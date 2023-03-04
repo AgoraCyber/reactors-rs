@@ -76,7 +76,7 @@ pub trait ReactorSeekable {
     type Handle;
 
     /// returns by [`seek`](Reactor::seek) method
-    type Seek<'cx>: Future<Output = Result<usize>> + 'cx
+    type Seek<'cx>: Future<Output = Result<u64>> + 'cx
     where
         Self: 'cx;
 
@@ -190,5 +190,97 @@ where
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<()>> {
         Poll::Ready(Ok(()))
+    }
+}
+
+/// [`futures::AsyncWrite`] + [`futures::AsyncRead`] implementation.
+pub struct AsyncReadWrite<R>
+where
+    for<'a> R: Reactor<WriteBuffer<'a> = &'a [u8], ReadBuffer<'a> = &'a mut [u8]>
+        + Unpin
+        + Clone
+        + 'static,
+    R::Handle: Clone,
+{
+    pub reactor: R,
+    pub handle: R::Handle,
+}
+
+impl<R> From<(R, R::Handle)> for AsyncReadWrite<R>
+where
+    for<'a> R: Reactor<WriteBuffer<'a> = &'a [u8], ReadBuffer<'a> = &'a mut [u8]>
+        + Unpin
+        + Clone
+        + 'static,
+    R::Handle: Clone,
+{
+    fn from(value: (R, R::Handle)) -> Self {
+        Self {
+            reactor: value.0,
+            handle: value.1,
+        }
+    }
+}
+
+impl<R> futures::AsyncWrite for AsyncReadWrite<R>
+where
+    for<'a> R: Reactor<WriteBuffer<'a> = &'a [u8], ReadBuffer<'a> = &'a mut [u8]>
+        + Unpin
+        + Clone
+        + 'static,
+    R::Handle: Clone,
+{
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<Result<usize>> {
+        let handle = self.handle.clone();
+        let reactor = &mut self.reactor;
+
+        let mut write = reactor.write(handle, buf);
+
+        write.poll_unpin(cx)
+    }
+
+    fn poll_close(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<()>> {
+        let handle = self.handle.clone();
+        let mut reactor = self.reactor.clone();
+
+        let mut close = reactor.close(handle);
+
+        close.poll_unpin(cx)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<R> futures::AsyncRead for AsyncReadWrite<R>
+where
+    for<'a> R: Reactor<WriteBuffer<'a> = &'a [u8], ReadBuffer<'a> = &'a mut [u8]>
+        + Unpin
+        + Clone
+        + 'static,
+    R::Handle: Clone,
+{
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut [u8],
+    ) -> std::task::Poll<Result<usize>> {
+        let handle = self.handle.clone();
+        let mut reactor = self.reactor.clone();
+
+        let mut read = reactor.read(handle, buf);
+
+        read.poll_unpin(cx)
     }
 }

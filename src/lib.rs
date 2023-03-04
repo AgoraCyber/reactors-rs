@@ -15,11 +15,13 @@ mod tests {
         time::{Duration, SystemTime},
     };
 
+    use async_std::io::ReadExt;
+    use futures::AsyncSeekExt;
     use hex::ToHex;
     use rand::{rngs::OsRng, RngCore};
     use std::{fs::create_dir_all, path::PathBuf};
 
-    use crate::file::{File, FileReactor};
+    use crate::file::{FileEx, FileReactor};
 
     fn prepare_test_dir() -> PathBuf {
         let mut dir_name = [0u8; 32];
@@ -34,6 +36,8 @@ mod tests {
 
         path
     }
+
+    static LOOP: usize = 100;
 
     #[tokio::test]
     async fn test_reactor_write() {
@@ -54,11 +58,43 @@ mod tests {
         let mut file = file_reactor.create_file(test_dir.join("1")).await.unwrap();
         let now = SystemTime::now();
 
-        for _ in 0..10000 {
+        for _ in 0..LOOP {
             file.write_all(&['0' as u8; 1024 * 1024]).await.unwrap();
         }
 
         log::debug!("reactor elapsed: {:?}", now.elapsed());
+    }
+
+    #[tokio::test]
+    async fn test_reactor() {
+        use futures::AsyncWriteExt;
+
+        _ = pretty_env_logger::try_init();
+
+        let test_dir = prepare_test_dir();
+
+        let mut file_reactor = FileReactor::new();
+
+        let loop_reactor = file_reactor.clone();
+
+        spawn(move || loop {
+            loop_reactor.poll_once(Duration::from_millis(200)).unwrap();
+        });
+
+        let mut file = file_reactor.create_file(test_dir.join("1")).await.unwrap();
+
+        file.write_all(&['1' as u8; 1024]).await.unwrap();
+
+        file.write_all(&['2' as u8; 1024]).await.unwrap();
+
+        file.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+
+        let mut buff = vec![];
+
+        file.read_to_end(&mut buff).await.unwrap();
+
+        assert_eq!(&buff[0..1024], ['1' as u8; 1024]);
+        assert_eq!(&buff[1024..], ['2' as u8; 1024]);
     }
 
     #[tokio::test]
@@ -72,7 +108,7 @@ mod tests {
 
         let now = SystemTime::now();
 
-        for _ in 0..10000 {
+        for _ in 0..LOOP {
             file.write_all(&['0' as u8; 1024 * 1024]).await.unwrap();
         }
 
@@ -89,7 +125,7 @@ mod tests {
 
         let now = SystemTime::now();
 
-        for _ in 0..10000 {
+        for _ in 0..LOOP {
             file.write_all(&['0' as u8; 1024 * 1024]).unwrap();
         }
 

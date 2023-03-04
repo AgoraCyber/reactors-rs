@@ -67,7 +67,7 @@ impl Reactor for FileReactor {
                 "a"
             }
         } else {
-            "a"
+            "a+"
         };
 
         let open_mode = CString::new(open_mode).unwrap();
@@ -152,7 +152,7 @@ impl ReactorSeekable for FileReactor {
             io::SeekFrom::End(offset) => unsafe { libc::fseek(handle.1, offset, libc::SEEK_END) },
         };
 
-        Seek(offset as usize)
+        Seek(offset as u64)
     }
 }
 
@@ -188,8 +188,6 @@ impl<'cx> Future for Write<'cx> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        // log::trace!("try write data({})", self.1.len());
-
         let len = unsafe { libc::write(self.0 .0, self.1.as_ptr() as *const c_void, self.1.len()) };
 
         if len == 0 {
@@ -209,7 +207,7 @@ impl<'cx> Future for Write<'cx> {
                 return Poll::Ready(Err(io::Error::from_raw_os_error(e.0)));
             }
         } else {
-            // log::trace!("write data({})", len);
+            log::trace!(target:"unix_fs","fd({}) write bytes({})", self.0 .0, len);
             return Poll::Ready(Ok(len as usize));
         }
     }
@@ -226,7 +224,7 @@ impl<'cx> Future for Read<'cx> {
         let len =
             unsafe { libc::read(self.0 .0, self.1.as_mut_ptr() as *mut c_void, self.1.len()) };
 
-        if len == 0 {
+        if len < 0 {
             let e = errno();
 
             set_errno(e);
@@ -241,15 +239,16 @@ impl<'cx> Future for Read<'cx> {
                 return Poll::Ready(Err(io::Error::from_raw_os_error(e.0)));
             }
         } else {
+            log::trace!(target:"unix_fs","fd({}) read bytes({})", self.0 .0, len);
             return Poll::Ready(Ok(len as usize));
         }
     }
 }
 
-pub struct Seek(usize);
+pub struct Seek(u64);
 
 impl Future for Seek {
-    type Output = Result<usize>;
+    type Output = Result<u64>;
     fn poll(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
