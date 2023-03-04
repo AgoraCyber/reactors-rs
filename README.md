@@ -1,2 +1,3 @@
-# events-rs
+# reactors
+
 Performance-focused cross-platform asynchronous IO implementation

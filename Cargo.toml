@@ -1,8 +1,11 @@
 [package]
-name = "events-rs"
+name = "reactors"
 version = "0.1.0"
 edition = "2021"
-publish = ["rsproxy"]
+license-file = "LICENSE"
+keywords = ["futures-rs", "reactor", "async", "file", "socket", "interprocess"]
+description = "Performance-focused cross-platform asynchronous IO implementation"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,3 +24,9 @@ async-std = { version = "1.12.0", features = ["attributes"] }
 rand = { version = "0.8.5", features = ["getrandom"] }
 hex = "^0.4"
 tokio = { version = "1", features = ["full"] }
+criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
+
+
+[[bench]]
+name = "file_rw_benchmark"
+harness = false
