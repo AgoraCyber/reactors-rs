@@ -10,17 +10,14 @@ use errno::{errno, set_errno};
 use futures::Future;
 use libc::c_void;
 
-use crate::{
-    poll_unix::UnixReactor,
-    reactor::{Reactor, ReactorSeekable},
-};
+use crate::reactor::{unix::UnixReactor, Reactor, ReactorSeekable};
 
 use crate::file::OpenOptions;
 
 #[derive(Clone, Debug)]
 pub struct FileHandle(i32, *mut libc::FILE);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FileReactor(UnixReactor);
 
 impl FileReactor {
@@ -44,8 +41,6 @@ impl Reactor for FileReactor {
 
     type Open<'cx> = Open;
 
-    type Close<'cx> = Close;
-
     type Write<'cx> = Write<'cx>;
 
     type Read<'cx> = Read<'cx>;
@@ -54,7 +49,7 @@ impl Reactor for FileReactor {
     where
         'a: 'cx,
     {
-        let open_mode = if description.append_or_truncate {
+        let open_mode = if !description.append_or_truncate {
             if description.read {
                 "w+"
             } else {
@@ -102,13 +97,11 @@ impl Reactor for FileReactor {
         Open(Some(handle))
     }
 
-    fn close<'a, 'cx>(&'a mut self, handle: Self::Handle) -> Self::Close<'cx>
-    where
-        'a: 'cx,
-    {
+    /// Close file by [`handle`](FileHandle).
+    fn close(&mut self, handle: Self::Handle) -> Result<()> {
         unsafe { libc::fclose(handle.1) };
 
-        Close
+        Ok(())
     }
 
     fn read<'a, 'cx>(
@@ -165,18 +158,6 @@ impl Future for Open {
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         std::task::Poll::Ready(self.0.take().unwrap())
-    }
-}
-
-pub struct Close;
-
-impl Future for Close {
-    type Output = Result<()>;
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        std::task::Poll::Ready(Ok(()))
     }
 }
 

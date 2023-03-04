@@ -6,7 +6,7 @@ use std::{
 
 use super::PollEvent;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UnixPoller {
     kq_handle: i32,
 }

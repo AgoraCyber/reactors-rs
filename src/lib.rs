@@ -3,8 +3,8 @@
 pub mod file;
 pub mod reactor;
 
-#[cfg_attr(target_family = "unix", path = "poll_unix/mod.rs")]
-pub mod poll_unix;
+#[cfg_attr(target_family = "unix", path = "poller/mod.rs")]
+pub mod poller;
 
 #[cfg(test)]
 mod tests {
@@ -112,7 +112,7 @@ mod tests {
             file.write_all(&['0' as u8; 1024 * 1024]).await.unwrap();
         }
 
-        log::debug!("tokio elapsed: {:?}", now.elapsed());
+        log::info!("tokio elapsed: {:?}", now.elapsed());
     }
 
     #[test]
@@ -129,6 +129,6 @@ mod tests {
             file.write_all(&['0' as u8; 1024 * 1024]).unwrap();
         }
 
-        log::debug!("std elapsed: {:?}", now.elapsed());
+        log::info!("std elapsed: {:?}", now.elapsed());
     }
 }

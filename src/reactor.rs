@@ -27,11 +27,6 @@ pub trait Reactor {
     where
         Self: 'cx;
 
-    /// returns by [`close`](Reactor::close) method
-    type Close<'cx>: Future<Output = Result<()>> + Unpin + 'cx
-    where
-        Self: 'cx;
-
     /// returns by [`write`](Reactor::write) method
     type Write<'cx>: Future<Output = Result<usize>> + Unpin + 'cx
     where
@@ -48,9 +43,7 @@ pub trait Reactor {
         'a: 'cx;
 
     /// Close file by [`handle`](FileHandle).
-    fn close<'a, 'cx>(&'a mut self, handle: Self::Handle) -> Self::Close<'cx>
-    where
-        'a: 'cx;
+    fn close(&mut self, handle: Self::Handle) -> Result<()>;
 
     /// Write data to file
     fn write<'a, 'cx>(
@@ -175,14 +168,12 @@ where
 
     fn poll_close(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<()>> {
         let handle = self.handle.clone();
         let mut reactor = self.reactor.clone();
 
-        let mut close = reactor.close(handle);
-
-        close.poll_unpin(cx)
+        Poll::Ready(reactor.close(handle))
     }
 
     fn poll_flush(
@@ -245,14 +236,12 @@ where
 
     fn poll_close(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<()>> {
         let handle = self.handle.clone();
         let mut reactor = self.reactor.clone();
 
-        let mut close = reactor.close(handle);
-
-        close.poll_unpin(cx)
+        Poll::Ready(reactor.close(handle))
     }
 
     fn poll_flush(
@@ -282,5 +271,108 @@ where
         let mut read = reactor.read(handle, buf);
 
         read.poll_unpin(cx)
+    }
+}
+
+#[cfg(target_family = "unix")]
+pub mod unix {
+
+    use crate::poller::*;
+
+    use std::{
+        collections::HashMap,
+        io::Result,
+        sync::{Arc, Mutex},
+        task::Waker,
+        time::Duration,
+    };
+
+    #[derive(Debug, Default)]
+    pub(crate) struct Wakers {
+        read_ops: HashMap<i32, Waker>,
+        write_ops: HashMap<i32, Waker>,
+    }
+
+    impl Wakers {
+        fn append_read(&mut self, fd: i32, waker: Waker) {
+            self.read_ops.insert(fd, waker);
+        }
+
+        fn append_write(&mut self, fd: i32, waker: Waker) {
+            self.write_ops.insert(fd, waker);
+        }
+
+        fn to_poll_events(&self) -> Vec<PollEvent> {
+            let mut poll_events = vec![];
+
+            for (fd, _) in &self.read_ops {
+                poll_events.push(PollEvent::Readable(*fd));
+            }
+
+            for (fd, _) in &self.write_ops {
+                poll_events.push(PollEvent::Writable(*fd));
+            }
+
+            poll_events
+        }
+
+        fn remove_fired_wakers(&mut self, events: &[PollEvent]) -> Vec<Waker> {
+            let mut wakers = vec![];
+
+            for event in events {
+                match event {
+                    PollEvent::Readable(fd) => {
+                        if let Some(waker) = self.read_ops.remove(fd) {
+                            wakers.push(waker);
+                        }
+                    }
+                    PollEvent::Writable(fd) => {
+                        if let Some(waker) = self.write_ops.remove(fd) {
+                            wakers.push(waker);
+                        }
+                    }
+                }
+            }
+
+            return wakers;
+        }
+    }
+
+    /// Reactor for unix family
+    #[derive(Clone, Debug)]
+    pub struct UnixReactor {
+        poller: UnixPoller,
+        pub(crate) wakers: Arc<Mutex<Wakers>>,
+    }
+
+    impl UnixReactor {
+        pub fn new() -> Self {
+            Self {
+                poller: UnixPoller::new(),
+                wakers: Default::default(),
+            }
+        }
+        /// Invoke poll procedure once,
+        pub fn poll_once(&self, timeout: Duration) -> Result<()> {
+            let events = self.wakers.lock().unwrap().to_poll_events();
+
+            let fired = self.poller.poll_once(&events, timeout)?;
+
+            let wakers = self.wakers.lock().unwrap().remove_fired_wakers(&fired);
+
+            for waker in wakers {
+                waker.wake_by_ref();
+            }
+
+            Ok(())
+        }
+
+        pub(crate) fn event_readable_set(&mut self, fd: i32, waker: Waker) {
+            self.wakers.lock().unwrap().append_read(fd, waker);
+        }
+
+        pub(crate) fn event_writable_set(&mut self, fd: i32, waker: Waker) {
+            self.wakers.lock().unwrap().append_write(fd, waker);
+        }
     }
 }

@@ -81,7 +81,12 @@ pub trait FileEx {
     where
         'a: 'cx,
     {
-        self.open_file(OpenOptions::build().path(path.into()))
+        self.open_file(
+            OpenOptions::build()
+                .read(true)
+                .truncate(true)
+                .path(path.into()),
+        )
     }
 
     fn read_file<'a, 'cx, P: Into<PathBuf>>(&'a mut self, path: P) -> Self::Open<'cx>
@@ -131,6 +136,7 @@ impl Future for FileOpen {
 }
 
 /// [`futures::AsyncWrite`] + [`futures::AsyncRead`] implementation.
+#[derive(Clone, Debug)]
 pub struct File {
     pub reactor: FileReactor,
     pub handle: FileHandle,
@@ -142,6 +148,15 @@ impl From<(FileReactor, FileHandle)> for File {
             reactor: value.0,
             handle: value.1,
         }
+    }
+}
+
+impl Drop for File {
+    fn drop(&mut self) {
+        let handle = self.handle.clone();
+        let mut reactor = self.reactor.clone();
+
+        reactor.close(handle).unwrap();
     }
 }
 
@@ -161,14 +176,12 @@ impl futures::AsyncWrite for File {
 
     fn poll_close(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<()>> {
         let handle = self.handle.clone();
         let mut reactor = self.reactor.clone();
 
-        let mut close = reactor.close(handle);
-
-        close.poll_unpin(cx)
+        Poll::Ready(reactor.close(handle))
     }
 
     fn poll_flush(
