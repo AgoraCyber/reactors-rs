@@ -9,7 +9,10 @@ use errno::{errno, set_errno};
 use futures::Future;
 use libc::c_void;
 
-use crate::{poll_unix::UnixReactor, reactor::Reactor};
+use crate::{
+    poll_unix::UnixReactor,
+    reactor::{Reactor, ReactorSeekable},
+};
 
 use crate::file::OpenOptions;
 
@@ -17,7 +20,6 @@ pub struct FileHandle(i32, *mut libc::FILE);
 
 pub type FileReactor = UnixReactor;
 
-#[allow(unused)]
 impl Reactor for FileReactor {
     type Handle = FileHandle;
 
@@ -34,8 +36,6 @@ impl Reactor for FileReactor {
     type Write<'cx> = Write<'cx>;
 
     type Read<'cx> = Read<'cx>;
-
-    type Seek<'cx> = Seek;
 
     fn open<'a, 'cx>(&'a mut self, description: Self::Description) -> Self::Open<'cx>
     where
@@ -109,6 +109,22 @@ impl Reactor for FileReactor {
         Read(handle, buff, self.clone())
     }
 
+    fn write<'a, 'cx>(
+        &'a mut self,
+        handle: Self::Handle,
+        buff: Self::WriteBuffer<'cx>,
+    ) -> Self::Write<'cx>
+    where
+        'a: 'cx,
+    {
+        Write(handle, buff, self.clone())
+    }
+}
+
+impl ReactorSeekable for FileReactor {
+    type Handle = FileHandle;
+
+    type Seek<'cx> = Seek;
     fn seek<'a, 'cx>(&'a mut self, handle: Self::Handle, pos: std::io::SeekFrom) -> Self::Seek<'cx>
     where
         'a: 'cx,
@@ -124,17 +140,6 @@ impl Reactor for FileReactor {
         };
 
         Seek(offset as usize)
-    }
-
-    fn write<'a, 'cx>(
-        &'a mut self,
-        handle: Self::Handle,
-        buff: Self::WriteBuffer<'cx>,
-    ) -> Self::Write<'cx>
-    where
-        'a: 'cx,
-    {
-        Write(handle, buff, self.clone())
     }
 }
 
