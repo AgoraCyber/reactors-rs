@@ -3,7 +3,7 @@ name = "reactors"
 version = "0.1.0"
 edition = "2021"
 license-file = "LICENSE"
-keywords = ["futures-rs", "reactor", "async", "file", "socket", "interprocess"]
+keywords = ["futures-rs", "reactor", "async", "file", "socket"]
 description = "Performance-focused cross-platform asynchronous IO implementation"
 readme = "README.md"
 
