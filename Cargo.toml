@@ -13,3 +13,11 @@ errno = "0.3.0"
 
 [target.'cfg(target_family = "unix")'.dependencies]
 libc = "^0.2"
+
+
+[dev-dependencies]
+pretty_env_logger = "^0.4"
+async-std = { version = "1.12.0", features = ["attributes"] }
+rand = { version = "0.8.5", features = ["getrandom"] }
+hex = "^0.4"
+tokio = { version = "1", features = ["full"] }

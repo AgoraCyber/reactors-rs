@@ -7,12 +7,15 @@
 
 #[cfg_attr(target_family = "unix", path = "file_unix.rs")]
 mod impls;
+use futures::{AsyncWrite, Future, FutureExt};
 pub use impls::*;
 
-use std::path::PathBuf;
+use std::{io::Result, path::PathBuf, task::Poll};
+
+use crate::reactor::Reactor;
 
 /// File open description
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OpenOptions {
     pub read: bool,
     pub write: bool,
@@ -64,6 +67,53 @@ impl OpenOptionsBuilder {
             write: self.write,
             append_or_truncate: self.append_or_truncate,
             path: path.into(),
+        }
+    }
+}
+
+pub trait File {
+    type Write: AsyncWrite + Unpin + 'static;
+
+    type Create<'cx>: Future<Output = Result<Self::Write>> + 'cx
+    where
+        Self: 'cx;
+    fn create_file<'a, 'cx, P: Into<PathBuf>>(&mut self, path: P) -> Self::Create<'cx>
+    where
+        'a: 'cx;
+}
+
+impl File for FileReactor {
+    type Write = crate::reactor::AsyncWrite<FileReactor>;
+
+    type Create<'cx> = FileCreate;
+    fn create_file<'a, 'cx, P: Into<PathBuf>>(&mut self, path: P) -> Self::Create<'cx>
+    where
+        'a: 'cx,
+    {
+        let ops = OpenOptions::build().path(path);
+
+        FileCreate(self.clone(), ops)
+    }
+}
+
+pub struct FileCreate(FileReactor, OpenOptions);
+
+impl Future for FileCreate {
+    type Output = Result<crate::reactor::AsyncWrite<FileReactor>>;
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let ops = self.1.clone();
+        let reactor = &mut self.0;
+
+        let mut open = reactor.open(ops);
+
+        match open.poll_unpin(cx) {
+            Poll::Pending => Poll::Pending,
+
+            Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+            Poll::Ready(Ok(handle)) => Poll::Ready(Ok((reactor.clone(), handle).into())),
         }
     }
 }

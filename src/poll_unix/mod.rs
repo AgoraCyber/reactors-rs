@@ -18,6 +18,7 @@ pub enum PollEvent {
     Writable(i32),
 }
 
+#[derive(Debug, Default)]
 pub(crate) struct Wakers {
     read_ops: HashMap<i32, Waker>,
     write_ops: HashMap<i32, Waker>,
@@ -76,6 +77,12 @@ pub struct UnixReactor {
 }
 
 impl UnixReactor {
+    pub fn new() -> Self {
+        Self {
+            poller: UnixPoller::new(),
+            wakers: Default::default(),
+        }
+    }
     /// Invoke poll procedure once,
     pub fn poll_once(&self, timeout: Duration) -> Result<()> {
         let events = self.wakers.lock().unwrap().to_poll_events();

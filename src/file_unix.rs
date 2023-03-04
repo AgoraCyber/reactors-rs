@@ -3,6 +3,7 @@ use std::{
     io::{self, Result},
     ptr::null_mut,
     task::Poll,
+    time::Duration,
 };
 
 use errno::{errno, set_errno};
@@ -16,9 +17,21 @@ use crate::{
 
 use crate::file::OpenOptions;
 
+#[derive(Clone, Debug)]
 pub struct FileHandle(i32, *mut libc::FILE);
 
-pub type FileReactor = UnixReactor;
+#[derive(Clone)]
+pub struct FileReactor(UnixReactor);
+
+impl FileReactor {
+    pub fn new() -> Self {
+        Self(UnixReactor::new())
+    }
+
+    pub fn poll_once(&self, timeout: Duration) -> Result<()> {
+        self.0.poll_once(timeout)
+    }
+}
 
 impl Reactor for FileReactor {
     type Handle = FileHandle;
@@ -175,8 +188,9 @@ impl<'cx> Future for Write<'cx> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        let len =
-            unsafe { libc::fwrite(self.1.as_ptr() as *const c_void, self.1.len(), 1, self.0 .1) };
+        // log::trace!("try write data({})", self.1.len());
+
+        let len = unsafe { libc::write(self.0 .0, self.1.as_ptr() as *const c_void, self.1.len()) };
 
         if len == 0 {
             let e = errno();
@@ -186,14 +200,17 @@ impl<'cx> Future for Write<'cx> {
             if e.0 == libc::EAGAIN || e.0 == libc::EWOULDBLOCK {
                 let fd = self.0 .0;
                 // register event notify
-                self.2.event_readable_set(fd, cx.waker().clone());
+                self.2 .0.event_readable_set(fd, cx.waker().clone());
+
+                log::trace!("write data WOULDBLOCK");
 
                 return Poll::Pending;
             } else {
                 return Poll::Ready(Err(io::Error::from_raw_os_error(e.0)));
             }
         } else {
-            return Poll::Ready(Ok(len));
+            // log::trace!("write data({})", len);
+            return Poll::Ready(Ok(len as usize));
         }
     }
 }
@@ -206,14 +223,8 @@ impl<'cx> Future for Read<'cx> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        let len = unsafe {
-            libc::fread(
-                self.1.as_mut_ptr() as *mut c_void,
-                self.1.len(),
-                1,
-                self.0 .1,
-            )
-        };
+        let len =
+            unsafe { libc::read(self.0 .0, self.1.as_mut_ptr() as *mut c_void, self.1.len()) };
 
         if len == 0 {
             let e = errno();
@@ -223,14 +234,14 @@ impl<'cx> Future for Read<'cx> {
             if e.0 == libc::EAGAIN || e.0 == libc::EWOULDBLOCK {
                 let fd = self.0 .0;
                 // register event notify
-                self.2.event_writable_set(fd, cx.waker().clone());
+                self.2 .0.event_writable_set(fd, cx.waker().clone());
 
                 return Poll::Pending;
             } else {
                 return Poll::Ready(Err(io::Error::from_raw_os_error(e.0)));
             }
         } else {
-            return Poll::Ready(Ok(len));
+            return Poll::Ready(Ok(len as usize));
         }
     }
 }

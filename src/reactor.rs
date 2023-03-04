@@ -9,12 +9,12 @@ use futures::FutureExt;
 /// Cross-platform event loop reactor.
 pub trait Reactor {
     /// File handle
-    type Handle;
+    type Handle: Unpin;
     /// File description and open parameters.
-    type Description;
+    type Description: Unpin;
 
     /// Buffer type for file read/write operators.
-    type WriteBuffer<'cx>
+    type WriteBuffer<'cx>: Unpin
     where
         Self: 'cx;
 
@@ -91,13 +91,26 @@ pub trait ReactorSeekable {
 }
 
 /// [`futures::AsyncRead`] implementation.
-struct AsyncRead<R>
+pub struct AsyncRead<R>
 where
     for<'a> R: Reactor<ReadBuffer<'a> = &'a mut [u8]> + Unpin + Clone + 'static,
     R::Handle: Clone,
 {
-    reactor: R,
-    handle: R::Handle,
+    pub reactor: R,
+    pub handle: R::Handle,
+}
+
+impl<R> From<(R, R::Handle)> for AsyncRead<R>
+where
+    for<'a> R: Reactor<ReadBuffer<'a> = &'a mut [u8]> + Unpin + Clone + 'static,
+    R::Handle: Clone,
+{
+    fn from(value: (R, R::Handle)) -> Self {
+        Self {
+            reactor: value.0,
+            handle: value.1,
+        }
+    }
 }
 
 impl<R> futures::AsyncRead for AsyncRead<R>
@@ -120,13 +133,26 @@ where
 }
 
 /// [`futures::AsyncWrite`] implementation.
-struct AsyncWrite<R>
+pub struct AsyncWrite<R>
 where
     for<'a> R: Reactor<WriteBuffer<'a> = &'a [u8]> + Unpin + Clone + 'static,
     R::Handle: Clone,
 {
-    reactor: R,
-    handle: R::Handle,
+    pub reactor: R,
+    pub handle: R::Handle,
+}
+
+impl<R> From<(R, R::Handle)> for AsyncWrite<R>
+where
+    for<'a> R: Reactor<WriteBuffer<'a> = &'a [u8]> + Unpin + Clone + 'static,
+    R::Handle: Clone,
+{
+    fn from(value: (R, R::Handle)) -> Self {
+        Self {
+            reactor: value.0,
+            handle: value.1,
+        }
+    }
 }
 
 impl<R> futures::AsyncWrite for AsyncWrite<R>
@@ -135,12 +161,12 @@ where
     R::Handle: Clone,
 {
     fn poll_write(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize>> {
         let handle = self.handle.clone();
-        let mut reactor = self.reactor.clone();
+        let reactor = &mut self.reactor;
 
         let mut write = reactor.write(handle, buf);
 
