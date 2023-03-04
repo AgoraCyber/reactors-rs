@@ -7,9 +7,9 @@
 
 #[cfg_attr(target_family = "unix", path = "file_unix.rs")]
 mod impls;
-use futures::{AsyncRead, AsyncWrite, Future, FutureExt};
 pub use impls::*;
 
+use futures::{AsyncRead, AsyncWrite, Future, FutureExt};
 use std::{io::Result, path::PathBuf, task::Poll};
 
 use crate::reactor::{Reactor, ReactorSeekable};

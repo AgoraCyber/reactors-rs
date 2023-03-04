@@ -31,7 +31,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         loop_reactor.poll_once(Duration::from_millis(200)).unwrap();
     });
 
-    let mut group = c.benchmark_group("file(c/w)");
+    let mut group = c.benchmark_group("async file(c/w)");
 
     group.measurement_time(Duration::from_secs(10));
 

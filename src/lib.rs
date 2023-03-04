@@ -2,6 +2,7 @@
 
 pub mod file;
 pub mod reactor;
+pub mod socket;
 
 #[cfg_attr(target_family = "unix", path = "poller/mod.rs")]
 pub mod poller;
