@@ -152,6 +152,8 @@ impl<'cx> Future for Read<'cx> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
+        log::trace!(target:"unix_net","fd({}) read bytes", self.0);
+
         let fd = self.0;
 
         let len = match &mut self.as_mut().1 {
@@ -159,6 +161,8 @@ impl<'cx> Future for Read<'cx> {
                 recv(fd, (*buff).as_mut_ptr() as *mut c_void, buff.len(), 0)
             },
             ReadBuffer::Datagram(buff, to) => unsafe {
+                log::trace!(target:"unix_net","fd({}) recvfrom", fd);
+
                 let mut addr = OsSocketAddr::new();
                 let mut len = 0u32;
                 let len = recvfrom(
@@ -178,6 +182,8 @@ impl<'cx> Future for Read<'cx> {
             },
         };
 
+        log::trace!(target:"unix_net","fd({}) read bytes({})", fd,len);
+
         if len < 0 {
             let e = errno();
 
@@ -187,6 +193,8 @@ impl<'cx> Future for Read<'cx> {
                 let fd = self.0;
                 // register event notify
                 self.2 .0.event_readable_set(fd, cx.waker().clone());
+
+                log::trace!(target:"unix_net","fd({}) WOULDBLOCK", fd);
 
                 return Poll::Pending;
             } else {

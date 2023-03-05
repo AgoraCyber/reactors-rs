@@ -104,17 +104,19 @@ impl NetOpenOptions {
 
             // Set SO_REUSEADDR
             if bind_addr {
-                let one = 1u8;
+                if ty == SOCK_STREAM {
+                    let one = 1u8;
 
-                if setsockopt(
-                    fd,
-                    SOL_SOCKET,
-                    SO_REUSEADDR,
-                    one.to_be_bytes().as_ptr() as *const c_void,
-                    1,
-                ) < 0
-                {
-                    return Err(Error::last_os_error());
+                    if setsockopt(
+                        fd,
+                        SOL_SOCKET,
+                        SO_REUSEADDR,
+                        one.to_be_bytes().as_ptr() as *const c_void,
+                        1,
+                    ) < 0
+                    {
+                        return Err(Error::last_os_error());
+                    }
                 }
 
                 let addr: OsSocketAddr = addr.clone().into();

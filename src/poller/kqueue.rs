@@ -19,6 +19,15 @@ impl UnixPoller {
     }
 
     pub fn poll_once(&self, events: &[PollEvent], timeout: Duration) -> Result<Vec<PollEvent>> {
+        log::trace!(
+            "poll_once: changes [{}]",
+            events
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+
         let mut changes = Vec::<kevent>::with_capacity(events.len());
 
         use libc::*;
@@ -103,6 +112,14 @@ impl UnixPoller {
                 }
             }
         }
+
+        log::trace!(
+            "poll_once: fired [{}]",
+            ret.iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
 
         Ok(ret)
     }

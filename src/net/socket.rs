@@ -218,6 +218,12 @@ impl From<(NetReactor, RawFd, usize)> for UdpSocket {
     }
 }
 
+impl Drop for UdpSocket {
+    fn drop(&mut self) {
+        _ = self.reactor.close(self.handle);
+    }
+}
+
 impl UdpSocketReactor for NetReactor {
     type Socket = UdpSocket;
     type Open<'cx> = UdpSocketOpen;
