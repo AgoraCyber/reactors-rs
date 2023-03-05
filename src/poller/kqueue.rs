@@ -36,7 +36,7 @@ impl UnixPoller {
             let k_event = match event {
                 PollEvent::Readable(fd) => kevent {
                     ident: *fd as usize,
-                    filter: EVFILT_WRITE,
+                    filter: EVFILT_READ,
                     flags: EV_ADD | EV_ONESHOT | EV_ENABLE,
                     fflags: 0,
                     data: 0,

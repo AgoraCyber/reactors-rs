@@ -16,7 +16,7 @@ mod tests {
         let loop_reactor = reactor.clone();
 
         std::thread::spawn(move || loop {
-            loop_reactor.poll_once(Duration::from_millis(200)).unwrap();
+            loop_reactor.poll_once(Duration::from_millis(500)).unwrap();
         });
 
         reactor
@@ -54,6 +54,6 @@ mod tests {
             .await
             .unwrap();
 
-        sleep(Duration::from_secs(20)).await;
+        sleep(Duration::from_secs(4)).await;
     }
 }

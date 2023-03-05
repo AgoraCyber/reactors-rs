@@ -1,5 +1,6 @@
 use std::{
     io::{Error, Result},
+    mem::size_of,
     net::SocketAddr,
     os::fd::RawFd,
     task::Poll,
@@ -163,18 +164,27 @@ impl<'cx> Future for Read<'cx> {
             ReadBuffer::Datagram(buff, to) => unsafe {
                 log::trace!(target:"unix_net","fd({}) recvfrom", fd);
 
-                let mut addr = OsSocketAddr::new();
-                let mut len = 0u32;
+                let mut remote = [0u8; size_of::<sockaddr_in6>()];
+
+                let mut len = remote.len() as u32;
+
                 let len = recvfrom(
                     fd,
                     buff.as_ptr() as *mut c_void,
                     buff.len(),
                     0,
-                    addr.as_mut_ptr(),
+                    remote.as_mut_ptr() as *mut sockaddr,
                     &mut len as *mut u32,
                 );
 
                 if len >= 0 {
+                    log::trace!(target:"unix_net","fd({}) recvfrom({}) remote({:?})",fd, len, remote);
+
+                    let addr = OsSocketAddr::copy_from_raw(
+                        remote.as_mut_ptr() as *mut sockaddr,
+                        len as socklen_t,
+                    );
+
                     **to = addr.into_addr()
                 }
 

@@ -284,6 +284,7 @@ pub mod unix {
         io::Result,
         sync::{Arc, Mutex},
         task::Waker,
+        thread::sleep,
         time::Duration,
     };
 
@@ -355,6 +356,11 @@ pub mod unix {
         /// Invoke poll procedure once,
         pub fn poll_once(&self, timeout: Duration) -> Result<()> {
             let events = self.wakers.lock().unwrap().to_poll_events();
+
+            if events.is_empty() {
+                sleep(timeout);
+                return Ok(());
+            }
 
             let fired = self.poller.poll_once(&events, timeout)?;
 
