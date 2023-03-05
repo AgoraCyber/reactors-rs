@@ -161,14 +161,20 @@ impl<'cx> Future for Read<'cx> {
             ReadBuffer::Datagram(buff, to) => unsafe {
                 let mut addr = OsSocketAddr::new();
                 let mut len = 0u32;
-                recvfrom(
+                let len = recvfrom(
                     fd,
                     buff.as_ptr() as *mut c_void,
                     buff.len(),
                     0,
                     addr.as_mut_ptr(),
                     &mut len as *mut u32,
-                )
+                );
+
+                if len >= 0 {
+                    **to = addr.into_addr()
+                }
+
+                len
             },
         };
 

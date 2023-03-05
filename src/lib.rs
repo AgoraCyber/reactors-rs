@@ -22,7 +22,7 @@ mod tests {
     use rand::{rngs::OsRng, RngCore};
     use std::{fs::create_dir_all, path::PathBuf};
 
-    use super::fs::{FileEx, FileReactor};
+    use super::fs::{FileReactor, FileReactorEx};
 
     fn prepare_test_dir() -> PathBuf {
         let mut dir_name = [0u8; 32];

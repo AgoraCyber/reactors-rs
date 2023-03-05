@@ -37,6 +37,7 @@ impl NetOpenOptions {
         match self {
             Self::Raw(fd) => Ok(fd),
             Self::Udp(addr) => Self::udp(addr),
+
             Self::TcpListener(addr) => Self::tcp_listener(addr),
             Self::TcpConnect { to, bind } => Self::tcp_connect(to, bind).await,
         }

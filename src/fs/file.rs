@@ -7,7 +7,7 @@ use crate::reactor::{Reactor, ReactorSeekable};
 
 use super::{FileHandle, FileReactor, OpenOptions};
 
-pub trait FileEx {
+pub trait FileReactorEx {
     type File: AsyncWrite + AsyncRead + Unpin + 'static;
 
     type Open<'cx>: Future<Output = Result<Self::File>> + 'cx
@@ -37,7 +37,7 @@ pub trait FileEx {
         'a: 'cx;
 }
 
-impl FileEx for FileReactor {
+impl FileReactorEx for FileReactor {
     type File = File;
 
     type Open<'cx> = FileOpen;

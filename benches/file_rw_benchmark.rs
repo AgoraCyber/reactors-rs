@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use reactors::fs::{FileEx, FileReactor};
+use reactors::fs::{FileReactor, FileReactorEx};
 
 use hex::ToHex;
 use rand::{rngs::OsRng, RngCore};
