@@ -12,7 +12,7 @@ use libc::c_void;
 
 use crate::reactor::{unix::UnixReactor, Reactor, ReactorSeekable};
 
-use crate::file::OpenOptions;
+use super::OpenOptions;
 
 #[derive(Clone, Debug)]
 pub struct FileHandle(i32, *mut libc::FILE);
@@ -179,7 +179,7 @@ impl<'cx> Future for Write<'cx> {
             if e.0 == libc::EAGAIN || e.0 == libc::EWOULDBLOCK {
                 let fd = self.0 .0;
                 // register event notify
-                self.2 .0.event_readable_set(fd, cx.waker().clone());
+                self.2 .0.event_writable_set(fd, cx.waker().clone());
 
                 log::trace!("write data WOULDBLOCK");
 
@@ -213,7 +213,7 @@ impl<'cx> Future for Read<'cx> {
             if e.0 == libc::EAGAIN || e.0 == libc::EWOULDBLOCK {
                 let fd = self.0 .0;
                 // register event notify
-                self.2 .0.event_writable_set(fd, cx.waker().clone());
+                self.2 .0.event_readable_set(fd, cx.waker().clone());
 
                 return Poll::Pending;
             } else {

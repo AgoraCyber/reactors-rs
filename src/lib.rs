@@ -1,8 +1,8 @@
 #![doc = include_str!("../README.md")]
 
-pub mod file;
+pub mod fs;
+pub mod net;
 pub mod reactor;
-pub mod socket;
 
 #[cfg_attr(target_family = "unix", path = "poller/mod.rs")]
 pub mod poller;
@@ -22,7 +22,7 @@ mod tests {
     use rand::{rngs::OsRng, RngCore};
     use std::{fs::create_dir_all, path::PathBuf};
 
-    use crate::file::{FileEx, FileReactor};
+    use super::fs::{FileEx, FileReactor};
 
     fn prepare_test_dir() -> PathBuf {
         let mut dir_name = [0u8; 32];
