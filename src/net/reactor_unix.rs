@@ -19,7 +19,7 @@ use libc::*;
 
 /// Reactor for network events.
 #[derive(Clone, Debug)]
-pub struct NetReactor(UnixReactor);
+pub struct NetReactor(pub(crate) UnixReactor);
 
 impl NetReactor {
     /// Create new network reactor
@@ -31,9 +31,15 @@ impl NetReactor {
     pub fn poll_once(&self, timeout: Duration) -> Result<()> {
         self.0.poll_once(timeout)
     }
+
+    /// Get the account of io waiting tasks.
+    pub fn wakers(&self) -> usize {
+        self.0.wakers()
+    }
 }
 
 pub enum ReadBuffer<'cx> {
+    Accept(&'cx mut Option<RawFd>, &'cx mut Option<SocketAddr>),
     Stream(&'cx mut [u8]),
     Datagram(&'cx mut [u8], &'cx mut Option<SocketAddr>),
 }
@@ -70,7 +76,7 @@ impl Reactor for NetReactor {
     where
         'a: 'cx,
     {
-        description.into_fd().boxed()
+        description.into_fd(self.clone()).boxed()
     }
 
     fn read<'a, 'cx>(
@@ -160,6 +166,34 @@ impl<'cx> Future for Read<'cx> {
         let fd = self.0;
 
         let len = match &mut self.as_mut().1 {
+            ReadBuffer::Accept(conn_fd, peer) => unsafe {
+                let mut remote = [0u8; size_of::<sockaddr_in6>()];
+
+                let mut len = remote.len() as u32;
+
+                let len = accept(
+                    fd,
+                    remote.as_mut_ptr() as *mut sockaddr,
+                    &mut len as *mut u32,
+                );
+
+                if len != -1 {
+                    let addr = OsSocketAddr::copy_from_raw(
+                        remote.as_mut_ptr() as *mut sockaddr,
+                        len as socklen_t,
+                    );
+
+                    **peer = addr.into_addr();
+
+                    **conn_fd = Some(len);
+
+                    log::trace!(target:"unix_net","fd({}) accept connection({}) from ({:?})", fd, len, peer);
+
+                    0
+                } else {
+                    -1
+                }
+            },
             ReadBuffer::Stream(buff) => unsafe {
                 recv(fd, (*buff).as_mut_ptr() as *mut c_void, buff.len(), 0)
             },

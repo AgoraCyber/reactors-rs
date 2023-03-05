@@ -42,7 +42,7 @@ impl TcpSocketReactor for NetReactor {
         &'a mut self,
         to: SocketAddr,
         bind_addr: Option<SocketAddr>,
-    ) -> Self::Listen<'cx>
+    ) -> Self::Connect<'cx>
     where
         'a: 'cx,
     {
@@ -70,9 +70,9 @@ impl TcpSocketReactor for NetReactor {
 
 /// Future for tcp socket open .
 pub struct SocketOpen<Socket: From<(NetReactor, RawFd)> + Unpin>(
-    NetReactor,
-    NetOpenOptions,
-    PhantomData<Socket>,
+    pub(crate) NetReactor,
+    pub(crate) NetOpenOptions,
+    pub(crate) PhantomData<Socket>,
 );
 
 impl<Socket: From<(NetReactor, RawFd)> + Unpin> Future for SocketOpen<Socket> {
@@ -97,20 +97,50 @@ impl<Socket: From<(NetReactor, RawFd)> + Unpin> Future for SocketOpen<Socket> {
 
 /// Socket instance with async io support
 #[derive(Clone, Debug)]
-pub struct TcpSocket(NetReactor, RawFd);
+pub struct TcpSocket {
+    reactor: NetReactor,
+    fd: RawFd,
+    remote: Option<SocketAddr>,
+}
 
 impl From<(NetReactor, RawFd)> for TcpSocket {
     fn from(value: (NetReactor, RawFd)) -> Self {
-        Self(value.0, value.1)
+        Self {
+            reactor: value.0,
+            fd: value.1,
+            remote: Default::default(),
+        }
+    }
+}
+
+impl TcpSocket {
+    /// Get connection peer [`address`](SocketAddr) or returns [`None`] if this socket is listener
+    pub fn remote(&self) -> &Option<SocketAddr> {
+        &self.remote
+    }
+
+    /// Accept next incoming connection.
+    pub async fn accept(&mut self) -> Result<TcpSocket> {
+        let mut remote = None;
+        let mut handle = None;
+
+        self.reactor
+            .read(self.fd, ReadBuffer::Accept(&mut handle, &mut remote))
+            .await?;
+
+        Ok(TcpSocket {
+            reactor: self.reactor.clone(),
+            fd: handle.expect("Underlay accept returns success, but not set connection fd"),
+            remote: Some(
+                remote.expect("Underlay accept returns success, but not set remote address"),
+            ),
+        })
     }
 }
 
 impl Drop for TcpSocket {
     fn drop(&mut self) {
-        let handle = self.1.clone();
-        let mut reactor = self.0.clone();
-
-        reactor.close(handle).unwrap();
+        self.reactor.close(self.fd).unwrap();
     }
 }
 
@@ -120,8 +150,8 @@ impl futures::AsyncWrite for TcpSocket {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize>> {
-        let handle = self.1.clone();
-        let reactor = &mut self.0;
+        let handle = self.fd;
+        let reactor = &mut self.reactor;
 
         let mut write = reactor.write(handle, WriteBuffer::Stream(buf));
 
@@ -129,11 +159,11 @@ impl futures::AsyncWrite for TcpSocket {
     }
 
     fn poll_close(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<()>> {
-        let handle = self.1.clone();
-        let mut reactor = self.0.clone();
+        let handle = self.fd;
+        let reactor = &mut self.reactor;
 
         Poll::Ready(reactor.close(handle))
     }
@@ -148,12 +178,12 @@ impl futures::AsyncWrite for TcpSocket {
 
 impl futures::AsyncRead for TcpSocket {
     fn poll_read(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         buf: &mut [u8],
     ) -> std::task::Poll<Result<usize>> {
-        let handle = self.1.clone();
-        let mut reactor = self.0.clone();
+        let handle = self.fd;
+        let reactor = &mut self.reactor;
 
         let mut read = reactor.read(handle, ReadBuffer::Stream(buf));
 
@@ -176,7 +206,11 @@ pub trait UdpSocketReactor {
 }
 
 /// Future for tcp socket open .
-pub struct UdpSocketOpen(NetReactor, NetOpenOptions, usize);
+pub struct UdpSocketOpen(
+    pub(crate) NetReactor,
+    pub(crate) NetOpenOptions,
+    pub(crate) usize,
+);
 
 impl Future for UdpSocketOpen {
     type Output = Result<UdpSocket>;

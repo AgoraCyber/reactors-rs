@@ -337,6 +337,10 @@ pub mod unix {
 
             return wakers;
         }
+
+        fn wakers(&self) -> usize {
+            self.read_ops.len() + self.write_ops.len()
+        }
     }
 
     /// Reactor for unix family
@@ -352,6 +356,10 @@ pub mod unix {
                 poller: UnixPoller::new(),
                 wakers: Default::default(),
             }
+        }
+
+        pub fn wakers(&self) -> usize {
+            self.wakers.lock().unwrap().wakers()
         }
         /// Invoke poll procedure once,
         pub fn poll_once(&self, timeout: Duration) -> Result<()> {
