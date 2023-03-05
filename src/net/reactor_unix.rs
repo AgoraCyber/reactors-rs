@@ -112,14 +112,18 @@ impl<'cx> Future for Write<'cx> {
             WriteBuffer::Datagram(buff, to) => unsafe {
                 let addr: OsSocketAddr = to.into();
 
-                sendto(
+                let len = sendto(
                     self.0,
                     buff.as_ptr() as *const c_void,
                     buff.len(),
                     0,
                     addr.as_ptr(),
                     addr.len(),
-                )
+                );
+
+                log::trace!(target:"unix_net","fd({}) sendto({}) {:?}", self.0, to, len);
+
+                len
             },
         };
 
@@ -153,8 +157,6 @@ impl<'cx> Future for Read<'cx> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        log::trace!(target:"unix_net","fd({}) read bytes", self.0);
-
         let fd = self.0;
 
         let len = match &mut self.as_mut().1 {
@@ -162,8 +164,6 @@ impl<'cx> Future for Read<'cx> {
                 recv(fd, (*buff).as_mut_ptr() as *mut c_void, buff.len(), 0)
             },
             ReadBuffer::Datagram(buff, to) => unsafe {
-                log::trace!(target:"unix_net","fd({}) recvfrom", fd);
-
                 let mut remote = [0u8; size_of::<sockaddr_in6>()];
 
                 let mut len = remote.len() as u32;
@@ -178,21 +178,21 @@ impl<'cx> Future for Read<'cx> {
                 );
 
                 if len >= 0 {
-                    log::trace!(target:"unix_net","fd({}) recvfrom({}) remote({:?})",fd, len, remote);
-
                     let addr = OsSocketAddr::copy_from_raw(
                         remote.as_mut_ptr() as *mut sockaddr,
                         len as socklen_t,
                     );
 
-                    **to = addr.into_addr()
+                    **to = addr.into_addr();
+
+                    log::trace!(target:"unix_net","fd({}) recvfrom({:?}) {}", fd, to, len);
                 }
 
                 len
             },
         };
 
-        log::trace!(target:"unix_net","fd({}) read bytes({})", fd,len);
+        log::trace!(target:"unix_net","fd({}) read bytes({})", self.0 , len);
 
         if len < 0 {
             let e = errno();
@@ -211,7 +211,6 @@ impl<'cx> Future for Read<'cx> {
                 return Poll::Ready(Err(Error::from_raw_os_error(e.0)));
             }
         } else {
-            log::trace!(target:"unix_net","fd({}) read bytes({})", self.0 , len);
             return Poll::Ready(Ok(len as usize));
         }
     }
