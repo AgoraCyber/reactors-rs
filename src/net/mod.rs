@@ -117,7 +117,7 @@ mod tests {
         let mut reactor = NetReactor::new();
 
         let server_addr = "127.0.0.1:1812".parse().unwrap();
-        let client_addr = "127.0.0.1:1813".parse().unwrap();
+        // let client_addr = "127.0.0.1:1813".parse().unwrap();
 
         let mut listener = reactor.listen(server_addr).await.unwrap();
 
@@ -131,7 +131,7 @@ mod tests {
             }
         }
 
-        let mut connection = reactor.connect(server_addr, Some(client_addr)).boxed();
+        let mut connection = reactor.connect(server_addr, None).boxed();
 
         match connection.poll_unpin(&mut ctx) {
             Poll::Pending => {}
@@ -141,6 +141,7 @@ mod tests {
         }
 
         while reactor.wakers() != 0 {
+            log::debug!("loop");
             reactor.poll_once(Duration::from_secs(1)).unwrap();
         }
 
