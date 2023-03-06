@@ -1,8 +1,15 @@
-use std::{io::Result, time::Duration};
+use std::{
+    io::{Error, Result},
+    net::SocketAddr,
+    sync::Once,
+    time::Duration,
+};
 
 use futures::{future::BoxFuture, Future, FutureExt};
+use os_socketaddr::OsSocketAddr;
+use windows::Win32::Networking::WinSock::{WSAStartup, WSADATA};
 
-use crate::reactor::Reactor;
+use crate::{net::socket::OpenTcpConnect, reactor::Reactor};
 
 use super::{NetOpenOptions, ReadBuffer, WriteBuffer};
 
@@ -14,6 +21,20 @@ pub struct NetReactor;
 
 impl NetReactor {
     pub fn new() -> Self {
+        static WSA_STARTUP: Once = Once::new();
+
+        WSA_STARTUP.call_once(|| unsafe {
+            let mut wsa_data = WSADATA::default();
+
+            let error = WSAStartup(2 << 8 | 2, &mut wsa_data);
+
+            if error != 0 {
+                Err::<(), Error>(Error::from_raw_os_error(error)).expect("WSAStartup error");
+            }
+
+            log::trace!("WSAStartup success")
+        });
+
         NetReactor
     }
 
@@ -104,5 +125,87 @@ impl<'cx> Future for Read<'cx> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         unimplemented!()
+    }
+}
+
+impl NetOpenOptions {
+    pub(crate) fn udp(addr: SocketAddr) -> Result<SocketFd> {
+        use windows::Win32::Networking::WinSock::*;
+
+        unsafe { Self::sock(&addr, SOCK_DGRAM, true) }
+    }
+
+    pub(crate) fn tcp_listener(addr: SocketAddr) -> Result<SocketFd> {
+        use windows::Win32::Networking::WinSock::*;
+
+        unsafe {
+            let fd = Self::sock(&addr, SOCK_STREAM, true)?;
+
+            if listen(fd, SOMAXCONN as i32) < 0 {
+                return Err(Error::last_os_error());
+            }
+
+            Ok(fd)
+        }
+    }
+
+    pub(crate) fn tcp_connect(
+        reactor: NetReactor,
+        to: SocketAddr,
+        bind_addr: Option<SocketAddr>,
+    ) -> Result<OpenTcpConnect> {
+        use windows::Win32::Networking::WinSock::*;
+
+        let fd = if let Some(addr) = bind_addr {
+            unsafe { Self::sock(&addr, SOCK_STREAM, true)? }
+        } else {
+            unsafe { Self::sock(&to, SOCK_STREAM, false)? }
+        };
+
+        let addr: OsSocketAddr = to.clone().into();
+
+        Ok(OpenTcpConnect(reactor, Some(fd), addr))
+    }
+
+    unsafe fn sock(addr: &SocketAddr, ty: u16, bind_addr: bool) -> Result<SocketFd> {
+        use windows::Win32::Networking::WinSock::*;
+
+        let fd = match addr {
+            SocketAddr::V4(_) => {
+                WSASocketW(AF_INET.0 as i32, ty as i32, 0, None, 0, WSA_FLAG_OVERLAPPED)
+            }
+            SocketAddr::V6(_) => WSASocketW(
+                AF_INET6.0 as i32,
+                ty as i32,
+                0,
+                None,
+                0,
+                WSA_FLAG_OVERLAPPED,
+            ),
+        };
+
+        if bind_addr {
+            if ty == SOCK_STREAM {
+                let one = 1i32;
+
+                if setsockopt(
+                    fd,
+                    SOL_SOCKET as i32,
+                    SO_REUSEADDR as i32,
+                    Some(&one.to_le_bytes()),
+                ) < 0
+                {
+                    return Err(Error::last_os_error());
+                }
+            }
+
+            let addr: OsSocketAddr = addr.clone().into();
+
+            if bind(fd, addr.as_ptr() as *const SOCKADDR, addr.len()) < 0 {
+                return Err(Error::last_os_error());
+            }
+        }
+
+        Ok(fd)
     }
 }

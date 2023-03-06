@@ -241,25 +241,87 @@ impl<'cx> Future for Read<'cx> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_enum_mut() {
-        #[derive(Debug, PartialEq)]
-        enum Hello {
-            Message(Option<String>),
-        }
+impl NetOpenOptions {
+    fn udp(addr: SocketAddr) -> Result<SocketFd> {
+        Self::sock(&addr, libc::SOCK_DGRAM, true)
+    }
 
-        fn modify_enum(hello: &mut Hello) {
-            match hello {
-                Hello::Message(_) => *hello = Hello::Message(Some("hello".to_owned())),
+    fn tcp_listener(addr: SocketAddr) -> Result<SocketFd> {
+        use libc::*;
+
+        let fd = Self::sock(&addr, libc::SOCK_STREAM, true)?;
+
+        unsafe {
+            if listen(fd, SOMAXCONN) < 0 {
+                return Err(Error::last_os_error());
             }
+
+            Ok(fd)
         }
+    }
 
-        let mut hello = Hello::Message(None);
+    fn tcp_connect(
+        reactor: NetReactor,
+        to: SocketAddr,
+        bind_addr: Option<SocketAddr>,
+    ) -> Result<OpenTcpConnect> {
+        let fd = if let Some(addr) = bind_addr {
+            Self::sock(&addr, libc::SOCK_STREAM, true)?
+        } else {
+            Self::sock(&to, libc::SOCK_STREAM, false)?
+        };
 
-        modify_enum(&mut hello);
+        let addr: OsSocketAddr = to.clone().into();
 
-        assert_eq!(hello, Hello::Message(Some("hello".to_owned())));
+        Ok(OpenTcpConnect(reactor, Some(fd), addr))
+    }
+
+    fn sock(addr: &SocketAddr, ty: c_int, bind_addr: bool) -> Result<SocketFd> {
+        use libc::*;
+
+        unsafe {
+            let fd = match addr {
+                SocketAddr::V4(_) => socket(AF_INET, ty, 0),
+                SocketAddr::V6(_) => socket(AF_INET6, ty, 0),
+            };
+
+            // Set O_NONBLOCK
+
+            let flags = fcntl(fd, F_GETFL);
+
+            if flags < 0 {
+                return Err(Error::last_os_error());
+            }
+
+            if fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 {
+                return Err(Error::last_os_error());
+            }
+
+            // Set SO_REUSEADDR
+            if bind_addr {
+                if ty == SOCK_STREAM {
+                    let one: c_int = 1;
+
+                    if setsockopt(
+                        fd,
+                        SOL_SOCKET,
+                        SO_REUSEADDR,
+                        one.to_be_bytes().as_ptr() as *const c_void,
+                        size_of::<c_int>() as u32,
+                    ) < 0
+                    {
+                        return Err(Error::last_os_error());
+                    }
+                }
+
+                let addr: OsSocketAddr = addr.clone().into();
+
+                if bind(fd, addr.as_ptr(), addr.len()) < 0 {
+                    return Err(Error::last_os_error());
+                }
+            }
+
+            Ok(fd)
+        }
     }
 }
