@@ -1,6 +1,7 @@
 #[cfg_attr(target_os = "macos", path = "kqueue.rs")]
 #[cfg_attr(target_os = "ios", path = "kqueue.rs")]
 #[cfg_attr(target_os = "freebsd", path = "kqueue.rs")]
+#[cfg_attr(target_os = "windows", path = "windows.rs")]
 mod impls;
 
 use std::{fmt::Display, io::Result};

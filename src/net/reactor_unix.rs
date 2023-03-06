@@ -38,17 +38,6 @@ impl NetReactor {
     }
 }
 
-pub enum ReadBuffer<'cx> {
-    Accept(&'cx mut Option<RawFd>, &'cx mut Option<SocketAddr>),
-    Stream(&'cx mut [u8]),
-    Datagram(&'cx mut [u8], &'cx mut Option<SocketAddr>),
-}
-
-pub enum WriteBuffer<'cx> {
-    Stream(&'cx [u8]),
-    Datagram(&'cx [u8], SocketAddr),
-}
-
 #[allow(unused)]
 impl Reactor for NetReactor {
     type Handle = RawFd;

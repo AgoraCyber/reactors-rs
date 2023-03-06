@@ -19,6 +19,11 @@ once_cell = "^1.17.1"
 [target.'cfg(target_family = "unix")'.dependencies]
 libc = "^0.2"
 
+[target.'cfg(target_family = "windows")'.dependencies]
+
+[dependencies.windows]
+version = "^0.44.0"
+features = ["Win32_Foundation", "Win32_Networking", "Win32_Networking_WinSock"]
 
 [dev-dependencies]
 pretty_env_logger = "^0.4"

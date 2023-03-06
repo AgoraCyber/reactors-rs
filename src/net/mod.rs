@@ -17,7 +17,7 @@ mod global {
 
     static INSTANCE_REACTOR: Lazy<NetReactor> = Lazy::new(|| {
         let reactor = NetReactor::new();
-        let loop_reactor = reactor.clone();
+        let mut loop_reactor = reactor.clone();
 
         std::thread::spawn(move || loop {
             match loop_reactor.poll_once(Duration::from_millis(500)) {

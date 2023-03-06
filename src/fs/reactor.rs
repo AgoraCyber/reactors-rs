@@ -1,5 +1,7 @@
 #[cfg_attr(target_family = "unix", path = "reactor_unix.rs")]
+#[cfg_attr(target_family = "windows", path = "reactor_windows.rs")]
 mod impls;
+
 use std::path::PathBuf;
 
 pub use impls::*;

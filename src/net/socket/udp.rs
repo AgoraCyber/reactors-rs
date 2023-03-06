@@ -1,10 +1,10 @@
-use std::{io::Result, net::SocketAddr, os::fd::RawFd, task::Poll};
+use std::{io::Result, net::SocketAddr, task::Poll};
 
 use futures::{future::BoxFuture, Future, FutureExt, Sink, Stream};
 
 use crate::reactor::Reactor;
 
-use crate::net::reactor::{NetOpenOptions, NetReactor, ReadBuffer, WriteBuffer};
+use crate::net::reactor::{NetOpenOptions, NetReactor, ReadBuffer, SocketFd, WriteBuffer};
 
 /// Extend [`NetReactor`] to add some udp helper methods.
 pub trait UdpSocketReactor {
@@ -23,7 +23,7 @@ pub trait UdpSocketReactor {
 /// Future for tcp socket open .
 pub struct UdpSocketOpen(
     pub(crate) NetReactor,
-    pub(crate) BoxFuture<'static, Result<RawFd>>,
+    pub(crate) BoxFuture<'static, Result<SocketFd>>,
     pub(crate) usize,
 );
 
@@ -46,13 +46,13 @@ impl Future for UdpSocketOpen {
 #[derive(Clone, Debug)]
 pub struct UdpSocket {
     reactor: NetReactor,
-    handle: RawFd,
+    handle: SocketFd,
     buff_size: usize,
     send_buff: Option<(Vec<u8>, SocketAddr)>,
 }
 
-impl From<(NetReactor, RawFd, usize)> for UdpSocket {
-    fn from(value: (NetReactor, RawFd, usize)) -> Self {
+impl From<(NetReactor, SocketFd, usize)> for UdpSocket {
+    fn from(value: (NetReactor, SocketFd, usize)) -> Self {
         Self {
             reactor: value.0,
             handle: value.1,
@@ -64,7 +64,7 @@ impl From<(NetReactor, RawFd, usize)> for UdpSocket {
 
 impl Drop for UdpSocket {
     fn drop(&mut self) {
-        log::debug!("close udp socket({})", self.handle);
+        log::debug!("close udp socket({:?})", self.handle);
         _ = self.reactor.close(self.handle);
     }
 }

@@ -1,14 +1,18 @@
 use std::io::{Error, ErrorKind};
-use std::mem::size_of;
-use std::{io::Result, net::SocketAddr, os::fd::RawFd, task::Poll};
 
+use std::{io::Result, net::SocketAddr, task::Poll};
+
+#[cfg(target_family = "unix")]
 use errno::{errno, set_errno};
+#[cfg(target_family = "unix")]
+use std::mem::size_of;
+
 use futures::{future::BoxFuture, Future, FutureExt};
 use os_socketaddr::OsSocketAddr;
 
 use crate::reactor::Reactor;
 
-use crate::net::reactor::{NetOpenOptions, NetReactor, ReadBuffer, WriteBuffer};
+use crate::net::reactor::{NetOpenOptions, NetReactor, ReadBuffer, SocketFd, WriteBuffer};
 
 /// Extend [`NetReactor`] to add some tcp helper methods.
 pub trait TcpSocketReactor {
@@ -84,7 +88,7 @@ impl TcpSocketReactor for NetReactor {
 /// Future to open tcp listener
 pub struct OpenTcpListener(
     pub(crate) NetReactor,
-    pub(crate) BoxFuture<'static, Result<RawFd>>,
+    pub(crate) BoxFuture<'static, Result<SocketFd>>,
     pub(crate) SocketAddr,
 );
 
@@ -110,7 +114,7 @@ impl Future for OpenTcpListener {
 /// Future to open tcp connection
 pub struct OpenTcpSocket(
     pub(crate) NetReactor,
-    pub(crate) BoxFuture<'static, Result<RawFd>>,
+    pub(crate) BoxFuture<'static, Result<SocketFd>>,
     pub(crate) SocketAddr,
 );
 
@@ -137,7 +141,7 @@ impl Future for OpenTcpSocket {
 #[derive(Clone, Debug)]
 pub struct TcpListener {
     reactor: NetReactor,
-    fd: RawFd,
+    fd: SocketFd,
     bind_addr: SocketAddr,
 }
 
@@ -166,7 +170,7 @@ impl TcpListener {
 
 impl Drop for TcpListener {
     fn drop(&mut self) {
-        log::debug!("close tcp socket({})", self.fd);
+        log::debug!("close tcp socket({:?})", self.fd);
         self.reactor.close(self.fd).unwrap();
     }
 }
@@ -175,7 +179,7 @@ impl Drop for TcpListener {
 #[derive(Clone, Debug)]
 pub struct TcpSocket {
     reactor: NetReactor,
-    fd: Option<RawFd>,
+    fd: Option<SocketFd>,
     remote: SocketAddr,
 }
 
@@ -189,7 +193,7 @@ impl TcpSocket {
 impl Drop for TcpSocket {
     fn drop(&mut self) {
         if let Some(fd) = self.fd.take() {
-            log::debug!("close tcp socket({})", fd);
+            log::debug!("close tcp socket({:?})", fd);
             self.reactor.close(fd).unwrap();
         }
     }
@@ -260,10 +264,22 @@ impl futures::AsyncRead for TcpSocket {
 
 pub struct OpenTcpConnect(
     pub(crate) NetReactor,
-    pub(crate) Option<RawFd>,
+    pub(crate) Option<SocketFd>,
     pub(crate) OsSocketAddr,
 );
 
+#[cfg(target_family = "windows")]
+impl Future for OpenTcpConnect {
+    type Output = Result<SocketFd>;
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        unimplemented!()
+    }
+}
+
+#[cfg(target_family = "unix")]
 impl Future for OpenTcpConnect {
     type Output = Result<RawFd>;
 
@@ -323,9 +339,8 @@ impl Drop for OpenTcpConnect {
     fn drop(&mut self) {
         log::debug!("close tcp connect({:?})", self.1);
         if let Some(fd) = self.1.take() {
-            unsafe {
-                libc::close(fd);
-            }
+            log::debug!("close tcp connect socket({:?})", fd);
+            self.0.close(fd).unwrap();
         }
     }
 }
