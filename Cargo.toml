@@ -36,7 +36,3 @@ singleton = []
 [[bench]]
 name = "file_rw_benchmark"
 harness = false
-
-[[bench]]
-name = "tcp_rw_benchmark"
-harness = false
