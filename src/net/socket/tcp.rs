@@ -1,4 +1,4 @@
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 use std::mem::size_of;
 use std::{io::Result, net::SocketAddr, os::fd::RawFd, task::Poll};
 
@@ -126,7 +126,7 @@ impl Future for OpenTcpSocket {
             Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
             Poll::Ready(Ok(handle)) => Poll::Ready(Ok(TcpSocket {
                 reactor: self.0.clone(),
-                fd: handle,
+                fd: Some(handle),
                 remote: self.2,
             })),
         }
@@ -158,7 +158,7 @@ impl TcpListener {
 
         Ok(TcpSocket {
             reactor: self.reactor.clone(),
-            fd: handle.expect("Underlay accept returns success, but not set connection fd"),
+            fd: Some(handle.expect("Underlay accept returns success, but not set connection fd")),
             remote: remote.expect("Underlay accept returns success, but not set remote address"),
         })
     }
@@ -175,7 +175,7 @@ impl Drop for TcpListener {
 #[derive(Clone, Debug)]
 pub struct TcpSocket {
     reactor: NetReactor,
-    fd: RawFd,
+    fd: Option<RawFd>,
     remote: SocketAddr,
 }
 
@@ -188,8 +188,10 @@ impl TcpSocket {
 
 impl Drop for TcpSocket {
     fn drop(&mut self) {
-        log::debug!("close tcp socket({})", self.fd);
-        self.reactor.close(self.fd).unwrap();
+        if let Some(fd) = self.fd.take() {
+            log::debug!("close tcp socket({})", fd);
+            self.reactor.close(fd).unwrap();
+        }
     }
 }
 
@@ -199,7 +201,13 @@ impl futures::AsyncWrite for TcpSocket {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize>> {
-        let handle = self.fd;
+        if self.fd.is_none() {
+            return Poll::Ready(Err(Error::new(
+                ErrorKind::BrokenPipe,
+                format!("Try write on closed socket"),
+            )));
+        }
+        let handle = self.fd.unwrap();
         let reactor = &mut self.reactor;
 
         let mut write = reactor.write(handle, WriteBuffer::Stream(buf));
@@ -211,10 +219,13 @@ impl futures::AsyncWrite for TcpSocket {
         mut self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<()>> {
-        let handle = self.fd;
-        let reactor = &mut self.reactor;
+        if let Some(fd) = self.fd.take() {
+            let reactor = &mut self.reactor;
 
-        Poll::Ready(reactor.close(handle))
+            Poll::Ready(reactor.close(fd))
+        } else {
+            Poll::Ready(Ok(()))
+        }
     }
 
     fn poll_flush(
@@ -231,7 +242,14 @@ impl futures::AsyncRead for TcpSocket {
         cx: &mut std::task::Context<'_>,
         buf: &mut [u8],
     ) -> std::task::Poll<Result<usize>> {
-        let handle = self.fd;
+        if self.fd.is_none() {
+            return Poll::Ready(Err(Error::new(
+                ErrorKind::BrokenPipe,
+                format!("Try write on closed socket"),
+            )));
+        }
+
+        let handle = self.fd.unwrap();
         let reactor = &mut self.reactor;
 
         let mut read = reactor.read(handle, ReadBuffer::Stream(buf));

@@ -163,6 +163,8 @@ impl<'cx> Future for Read<'cx> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
+        log::trace!(target:"unix_net","fd({}) read bytes", self.0 );
+
         let fd = self.0;
 
         let len = match &mut self.as_mut().1 {

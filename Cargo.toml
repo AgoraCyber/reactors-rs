@@ -30,8 +30,13 @@ criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
 futures-test = "^0.3"
 
 [features]
+default = ["singleton"]
 singleton = []
 
 [[bench]]
 name = "file_rw_benchmark"
+harness = false
+
+[[bench]]
+name = "tcp_rw_benchmark"
 harness = false

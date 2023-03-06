@@ -75,9 +75,9 @@ pub use global::*;
 #[cfg(test)]
 mod tests {
 
-    use std::{task::Poll, time::Duration};
+    use std::{io::ErrorKind, task::Poll, time::Duration};
 
-    use futures::{FutureExt, SinkExt, StreamExt};
+    use futures::{AsyncReadExt, AsyncWriteExt, FutureExt, SinkExt, StreamExt};
     use futures_test::{assert_stream_next, assert_stream_pending, task::noop_context};
 
     use super::{
@@ -111,7 +111,11 @@ mod tests {
                 .await
                 .unwrap();
 
-            reactor.poll_once(Duration::from_millis(200)).unwrap();
+            while reactor.wakers() != 0 {
+                reactor.poll_once(Duration::from_secs(1)).unwrap();
+            }
+
+            log::debug!("loop");
 
             assert_stream_next!(udp_srever, (buff, client_addr));
         }
@@ -148,12 +152,44 @@ mod tests {
         }
 
         while reactor.wakers() != 0 {
-            log::debug!("loop");
             reactor.poll_once(Duration::from_secs(1)).unwrap();
         }
 
-        let _server_connection = accept.await.unwrap();
+        let mut server_connection = accept.await.unwrap();
 
-        let _client_connection = connection.await.unwrap();
+        let mut client_connection = connection.await.unwrap();
+
+        let write_all = client_connection.write_all(b"hello world").boxed();
+
+        let mut buff = [0u8; 11];
+
+        let read_exact = server_connection.read_exact(&mut buff).boxed();
+
+        while reactor.wakers() != 0 {
+            reactor.poll_once(Duration::from_secs(1)).unwrap();
+        }
+
+        write_all.await.unwrap();
+
+        read_exact.await.unwrap();
+
+        assert_eq!(&buff, b"hello world");
+
+        client_connection.close().await.unwrap();
+
+        let read_exact = server_connection.read_exact(&mut buff).boxed();
+
+        while reactor.wakers() != 0 {
+            reactor.poll_once(Duration::from_secs(1)).unwrap();
+        }
+
+        match read_exact.await {
+            Ok(_) => {
+                assert!(false, "expect eof")
+            }
+            Err(err) => {
+                assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
+            }
+        }
     }
 }
