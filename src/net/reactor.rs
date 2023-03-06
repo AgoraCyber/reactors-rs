@@ -7,13 +7,12 @@ use std::{
     mem::size_of,
     net::SocketAddr,
     os::fd::RawFd,
-    task::Poll,
 };
 
-use errno::{errno, set_errno};
-use futures::Future;
 pub use impls::*;
 use os_socketaddr::OsSocketAddr;
+
+use super::socket::OpenTcpConnect;
 
 /// Net fd open options.
 #[derive(Clone, Debug)]
@@ -69,7 +68,7 @@ impl NetOpenOptions {
         reactor: NetReactor,
         to: SocketAddr,
         bind_addr: Option<SocketAddr>,
-    ) -> Result<TcpConnect> {
+    ) -> Result<OpenTcpConnect> {
         let fd = if let Some(addr) = bind_addr {
             Self::sock(&addr, libc::SOCK_STREAM, true)?
         } else {
@@ -78,7 +77,7 @@ impl NetOpenOptions {
 
         let addr: OsSocketAddr = to.clone().into();
 
-        Ok(TcpConnect(reactor, fd, addr))
+        Ok(OpenTcpConnect(reactor, Some(fd), addr))
     }
 
     fn sock(addr: &SocketAddr, ty: c_int, bind_addr: bool) -> Result<RawFd> {
@@ -104,20 +103,20 @@ impl NetOpenOptions {
 
             // Set SO_REUSEADDR
             if bind_addr {
-                // if ty == SOCK_STREAM {
-                //     let one: c_int = 1;
+                if ty == SOCK_STREAM {
+                    let one: c_int = 1;
 
-                //     if setsockopt(
-                //         fd,
-                //         SOL_SOCKET,
-                //         SO_REUSEADDR,
-                //         one.to_be_bytes().as_ptr() as *const c_void,
-                //         size_of::<c_int>() as u32,
-                //     ) < 0
-                //     {
-                //         return Err(Error::last_os_error());
-                //     }
-                // }
+                    if setsockopt(
+                        fd,
+                        SOL_SOCKET,
+                        SO_REUSEADDR,
+                        one.to_be_bytes().as_ptr() as *const c_void,
+                        size_of::<c_int>() as u32,
+                    ) < 0
+                    {
+                        return Err(Error::last_os_error());
+                    }
+                }
 
                 let addr: OsSocketAddr = addr.clone().into();
 
@@ -127,59 +126,6 @@ impl NetOpenOptions {
             }
 
             Ok(fd)
-        }
-    }
-}
-
-#[cfg(target_family = "unix")]
-struct TcpConnect(NetReactor, RawFd, OsSocketAddr);
-
-#[cfg(target_family = "unix")]
-impl Future for TcpConnect {
-    type Output = Result<RawFd>;
-
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let fd = self.1;
-
-        unsafe {
-            let err_no: c_int = 0;
-
-            let mut len = size_of::<c_int>() as u32;
-
-            if libc::getsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_ERROR,
-                err_no.to_be_bytes().as_mut_ptr() as *mut libc::c_void,
-                &mut len as *mut u32,
-            ) < 0
-            {
-                return Poll::Ready(Err(Error::last_os_error()));
-            }
-
-            if err_no != 0 {
-                return Poll::Ready(Err(Error::from_raw_os_error(err_no)));
-            }
-
-            if libc::connect(fd, self.2.as_ptr(), self.2.len()) < 0 {
-                let e = errno();
-
-                set_errno(e);
-
-                if e.0 == libc::EAGAIN || e.0 == libc::EWOULDBLOCK || e.0 == libc::EINPROGRESS {
-                    // register event notify
-                    self.0 .0.event_writable_set(fd, cx.waker().clone());
-
-                    return Poll::Pending;
-                } else {
-                    return Poll::Ready(Err(Error::from_raw_os_error(e.0)));
-                }
-            } else {
-                return Poll::Ready(Ok(self.1));
-            }
         }
     }
 }

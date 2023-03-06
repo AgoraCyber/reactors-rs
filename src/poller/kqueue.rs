@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use super::PollEvent;
+use super::{PollEvent, PollEventChanged};
 
 #[derive(Clone, Debug)]
 pub struct UnixPoller {
@@ -18,7 +18,11 @@ impl UnixPoller {
         Self { kq_handle }
     }
 
-    pub fn poll_once(&self, events: &[PollEvent], timeout: Duration) -> Result<Vec<PollEvent>> {
+    pub fn poll_once(
+        &self,
+        events: &[PollEvent],
+        timeout: Duration,
+    ) -> Result<Vec<PollEventChanged>> {
         log::trace!(
             "poll_once: changes [{}]",
             events
@@ -95,16 +99,21 @@ impl UnixPoller {
             match event.filter {
                 EVFILT_READ => {
                     if event.flags & EV_ERROR != 0 {
-                        log::error!(target:"kevent","fd({}) fired error,{}",event.ident as i32,io::Error::from_raw_os_error(event.data as i32));
+                        let error = io::Error::from_raw_os_error(event.data as i32);
+                        log::error!(target:"kevent","fd({}) fired error,{}",event.ident as i32,error);
+
+                        ret.push(PollEventChanged::Readable(event.ident as i32, Err(error)))
                     } else {
-                        ret.push(PollEvent::Readable(event.ident as i32))
+                        ret.push(PollEventChanged::Readable(event.ident as i32, Ok(())))
                     }
                 }
                 EVFILT_WRITE => {
                     if event.flags & EV_ERROR != 0 {
-                        log::error!(target:"kevent","fd({}) fired error,{}",event.ident as i32,io::Error::from_raw_os_error(event.data as i32));
+                        let error = io::Error::from_raw_os_error(event.data as i32);
+                        log::error!(target:"kevent","fd({}) fired error,{}",event.ident as i32,error);
+                        ret.push(PollEventChanged::Writable(event.ident as i32, Err(error)))
                     } else {
-                        ret.push(PollEvent::Writable(event.ident as i32))
+                        ret.push(PollEventChanged::Writable(event.ident as i32, Ok(())))
                     }
                 }
                 _ => {

@@ -317,17 +317,17 @@ pub mod unix {
             poll_events
         }
 
-        fn remove_fired_wakers(&mut self, events: &[PollEvent]) -> Vec<Waker> {
+        fn remove_fired_wakers(&mut self, events: &[PollEventChanged]) -> Vec<Waker> {
             let mut wakers = vec![];
 
             for event in events {
                 match event {
-                    PollEvent::Readable(fd) => {
+                    PollEventChanged::Readable(fd, _) => {
                         if let Some(waker) = self.read_ops.remove(fd) {
                             wakers.push(waker);
                         }
                     }
-                    PollEvent::Writable(fd) => {
+                    PollEventChanged::Writable(fd, _) => {
                         if let Some(waker) = self.write_ops.remove(fd) {
                             wakers.push(waker);
                         }

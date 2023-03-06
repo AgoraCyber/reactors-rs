@@ -8,9 +8,11 @@ mod global {
 
     use once_cell::sync::Lazy;
 
+    use crate::reactor::Reactor;
+
     use super::{
         reactor::{NetOpenOptions, NetReactor},
-        socket::{SocketOpen, TcpSocket, UdpSocketOpen},
+        socket::{OpenTcpListener, OpenTcpSocket, UdpSocketOpen},
     };
 
     static INSTANCE_REACTOR: Lazy<NetReactor> = Lazy::new(|| {
@@ -31,33 +33,39 @@ mod global {
     });
 
     /// Start a new tcp server listener and bind to [`addr`](SocketAddr)
-    pub fn tcp_listen(addr: SocketAddr) -> SocketOpen<TcpSocket> {
-        SocketOpen::<TcpSocket>(
-            INSTANCE_REACTOR.clone(),
-            NetOpenOptions::TcpListener(addr),
-            Default::default(),
-        )
+    pub fn tcp_listen(addr: SocketAddr) -> OpenTcpListener {
+        let opts = NetOpenOptions::TcpListener(addr);
+
+        let mut reactor = INSTANCE_REACTOR.clone();
+
+        let fut = reactor.open(opts);
+
+        OpenTcpListener(reactor, fut, addr)
     }
 
     /// Create new tcp client and connect to remote endpoint.
-    pub fn tcp_connect(to: SocketAddr, bind_addr: Option<SocketAddr>) -> SocketOpen<TcpSocket> {
-        SocketOpen::<TcpSocket>(
-            INSTANCE_REACTOR.clone(),
-            NetOpenOptions::TcpConnect {
-                to,
-                bind: bind_addr,
-            },
-            Default::default(),
-        )
+    pub fn tcp_connect(to: SocketAddr, bind_addr: Option<SocketAddr>) -> OpenTcpSocket {
+        let opts = NetOpenOptions::TcpConnect {
+            to,
+            bind: bind_addr,
+        };
+
+        let mut reactor = INSTANCE_REACTOR.clone();
+
+        let fut = reactor.open(opts);
+
+        OpenTcpSocket(reactor, fut, to)
     }
 
     /// Create new tcp client and connect to remote endpoint.
     pub fn udp(bind_addr: SocketAddr, buff_size: usize) -> UdpSocketOpen {
-        UdpSocketOpen(
-            INSTANCE_REACTOR.clone(),
-            NetOpenOptions::Udp(bind_addr),
-            buff_size,
-        )
+        let opts = NetOpenOptions::Udp(bind_addr);
+
+        let mut reactor = INSTANCE_REACTOR.clone();
+
+        let fut = reactor.open(opts);
+
+        UdpSocketOpen(reactor, fut, buff_size)
     }
 }
 
@@ -96,7 +104,6 @@ mod tests {
         let mut udp_srever = udp_server.map(|c| c.unwrap());
 
         for i in 0..10 {
-            log::debug!("loop {}", i);
             let buff = format!("hello world {}", i).as_bytes().to_vec();
 
             udp_client
