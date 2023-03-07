@@ -1,15 +1,18 @@
 use std::{io::SeekFrom, task::Waker};
 
-use crate::{io::poller::Poller, ReactorHandle, ReactorHandleSeekable};
+use crate::{
+    io::poller::{PollerWrapper, SysPoller},
+    ReactorHandle, ReactorHandleSeekable,
+};
 
-pub struct FileHandle<P>(P, *mut libc::FILE)
+pub struct FileHandle<P>(PollerWrapper<P>, *mut libc::FILE)
 where
-    P: Poller + Unpin + Clone + 'static;
+    P: SysPoller + Unpin + Clone + 'static;
 
 #[allow(unused)]
 impl<P> ReactorHandle for FileHandle<P>
 where
-    P: Poller + Unpin + Clone + 'static,
+    P: SysPoller + Unpin + Clone + 'static,
 {
     type ReadBuffer<'cx> = &'cx mut [u8];
 
@@ -41,7 +44,7 @@ where
 #[allow(unused)]
 impl<P> ReactorHandleSeekable for FileHandle<P>
 where
-    P: Poller + Unpin + Clone + 'static,
+    P: SysPoller + Unpin + Clone + 'static,
 {
     fn seek(
         &mut self,

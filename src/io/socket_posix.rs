@@ -1,15 +1,18 @@
-use crate::{io::poller::Poller, ReactorHandle};
+use crate::{
+    io::poller::{PollerWrapper, SysPoller},
+    ReactorHandle,
+};
 
 use super::{SocketReadBuffer, SocketWriteBuffer};
 
-pub struct SocketHandle<P>(P, i32)
+pub struct SocketHandle<P>(PollerWrapper<P>, i32)
 where
-    P: Poller + Clone + 'static;
+    P: SysPoller + Clone + 'static;
 
 #[allow(unused)]
 impl<P> ReactorHandle for SocketHandle<P>
 where
-    P: Poller + Clone + 'static,
+    P: SysPoller + Clone + 'static,
 {
     type ReadBuffer<'cx> = SocketReadBuffer<'cx>;
     type WriteBuffer<'cx> = SocketWriteBuffer<'cx>;
