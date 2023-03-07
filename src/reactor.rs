@@ -2,7 +2,6 @@
 //!
 
 use std::{
-    future::Future,
     io::{Result, SeekFrom},
     task::{Poll, Waker},
     time::Duration,
@@ -10,28 +9,8 @@ use std::{
 
 /// File-based reactor pattern core trait.
 pub trait Reactor {
-    /// File handle
-    type Handle: ReactorHandle + Unpin;
-
-    /// File open code.
-    type OpCode: ReactorOpCode + Unpin;
-
-    /// returns by [`open`](Reactor::open) method
-    type Open<'cx>: Future<Output = Result<Self::Handle>> + Unpin + 'cx
-    where
-        Self: 'cx;
-
-    /// Open file with opcode and returns file handle.
-    ///
-    /// # parameter
-    ///
-    /// - `OpCode` implementation defined type of [`opcode`](Reactor::OpCode)
-    fn open<'a, 'cx>(&'a mut self, opcode: Self::OpCode) -> Self::Open<'cx>
-    where
-        'a: 'cx;
-
     /// Poll reactor events once.
-    fn poll_once(&mut self, duration: Duration) -> Result<()>;
+    fn poll_once(&mut self, duration: Duration) -> Result<usize>;
 }
 
 /// Reactor pattern support stream seek
@@ -42,7 +21,7 @@ pub trait ReactorHandleSeekable {
 }
 
 /// Reactor file handle must implement this trait.
-pub trait ReactorHandle {
+pub trait ReactorHandle: Sized {
     /// Buffer type for file write operators.
     type WriteBuffer<'cx>: Unpin
     where
@@ -82,13 +61,4 @@ pub trait ReactorHandle {
 
     ///
     fn poll_close(&mut self, waker: Waker) -> Poll<Result<()>>;
-}
-
-/// Reactor opcode must implement this trait.
-pub trait ReactorOpCode {
-    /// Open handle type.
-    type Handle: ReactorHandle;
-
-    /// Nonblock create file handle.
-    fn poll_open(&mut self) -> Poll<Result<Self::Handle>>;
 }

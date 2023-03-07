@@ -1,5 +1,7 @@
 use std::{
+    ffi::CString,
     io::{Error, ErrorKind, Result, SeekFrom},
+    ptr::null_mut,
     task::{Poll, Waker},
     time::SystemTime,
 };
@@ -35,6 +37,45 @@ where
             file,
             last_read_poll_time: Default::default(),
             last_write_poll_time: Default::default(),
+        }
+    }
+
+    pub fn create(poller: PollerWrapper<P>, path: &str) -> Result<Self> {
+        Self::fopen(poller, "w+", path)
+    }
+
+    pub fn open(poller: PollerWrapper<P>, path: &str) -> Result<Self> {
+        Self::fopen(poller, "a+", path)
+    }
+
+    fn fopen(poller: PollerWrapper<P>, mode: &str, path: &str) -> Result<Self> {
+        let open_mode = CString::new(mode).unwrap();
+
+        let path = CString::new(path).unwrap();
+
+        unsafe {
+            use libc::*;
+
+            let handle = fopen(path.as_ptr(), open_mode.as_ptr());
+
+            let fd = fileno(handle);
+
+            let flags = fcntl(fd, F_GETFL);
+
+            if flags < 0 {
+                Err(Error::last_os_error())
+            } else {
+                // set fd to nonblock
+                if fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 {
+                    Err(Error::last_os_error())
+                } else {
+                    if handle == null_mut() {
+                        Err(Error::last_os_error())
+                    } else {
+                        Ok(FileHandle::new(poller, handle))
+                    }
+                }
+            }
         }
     }
 }

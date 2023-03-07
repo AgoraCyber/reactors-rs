@@ -8,7 +8,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::timewheel::TimeWheel;
+use crate::{timewheel::TimeWheel, Reactor};
 
 pub mod sys;
 
@@ -110,9 +110,11 @@ impl<P: SysPoller + Clone> PollerWrapper<P> {
             wakers.time_wheel.add(timeout, PollOpCode::Writable(fd));
         }
     }
+}
 
+impl<P: SysPoller + Clone> Reactor for PollerWrapper<P> {
     /// Poll io events once.
-    pub fn poll_once(&mut self, timeout: Duration) -> Result<usize> {
+    fn poll_once(&mut self, timeout: Duration) -> Result<usize> {
         let opcodes = {
             let wakers = self.wakers.lock().unwrap();
 

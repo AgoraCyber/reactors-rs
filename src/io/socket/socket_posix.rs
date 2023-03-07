@@ -1,6 +1,7 @@
 use std::{
     io::{Error, ErrorKind, Result},
     mem::size_of,
+    net::SocketAddr,
     task::{Poll, Waker},
     time::SystemTime,
 };
@@ -40,9 +41,129 @@ where
             last_write_poll_time: Default::default(),
         }
     }
+    /// Create udp socket with [`addr`](SocketAddr)
+    pub fn udp(poller: PollerWrapper<P>, addr: SocketAddr) -> Result<Self> {
+        use libc::*;
+
+        unsafe {
+            let fd = match addr {
+                SocketAddr::V4(_) => socket(AF_INET, SOCK_DGRAM, 0),
+                SocketAddr::V6(_) => socket(AF_INET6, SOCK_DGRAM, 0),
+            };
+
+            if fd < 0 {
+                return Err(Error::last_os_error());
+            }
+
+            crate::io::noblock(fd)?;
+
+            let addr: OsSocketAddr = addr.into();
+
+            if bind(fd, addr.as_ptr(), addr.len()) < 0 {
+                return Err(Error::last_os_error());
+            }
+
+            Ok(Self::new(poller, fd))
+        }
+    }
+
+    /// Create tcp socket
+    pub fn tcp(poller: PollerWrapper<P>, bind_addr: SocketAddr) -> Result<Self> {
+        use libc::*;
+
+        unsafe {
+            let fd = match bind_addr {
+                SocketAddr::V4(_) => socket(AF_INET, SOCK_STREAM, 0),
+                SocketAddr::V6(_) => socket(AF_INET6, SOCK_STREAM, 0),
+            };
+
+            if fd < 0 {
+                return Err(Error::last_os_error());
+            }
+
+            crate::io::noblock(fd)?;
+
+            let addr: OsSocketAddr = bind_addr.into();
+
+            if bind(fd, addr.as_ptr(), addr.len()) < 0 {
+                return Err(Error::last_os_error());
+            }
+
+            Ok(Self::new(poller, fd))
+        }
+    }
+
+    pub fn poll_connect(
+        &mut self,
+        remote: SocketAddr,
+        waker: std::task::Waker,
+        timeout: Option<std::time::Duration>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        use libc::*;
+
+        let remote: OsSocketAddr = remote.into();
+
+        let len = unsafe {
+            let err_no: c_int = 0;
+
+            let mut len = size_of::<c_int>() as u32;
+
+            if libc::getsockopt(
+                self.fd,
+                libc::SOL_SOCKET,
+                libc::SO_ERROR,
+                err_no.to_be_bytes().as_mut_ptr() as *mut libc::c_void,
+                &mut len as *mut u32,
+            ) < 0
+            {
+                return Poll::Ready(Err(Error::last_os_error()));
+            }
+
+            if err_no != 0 {
+                return Poll::Ready(Err(Error::from_raw_os_error(err_no)));
+            }
+
+            connect(self.fd, remote.as_ptr(), remote.len())
+        };
+
+        if len < 0 {
+            let e = errno();
+
+            set_errno(e);
+
+            if e.0 == libc::EAGAIN || e.0 == libc::EWOULDBLOCK || e.0 == libc::EINPROGRESS {
+                if let Some(timeout) = &timeout {
+                    // second time read .
+                    if let Some(last_write_poll_time) = self.last_write_poll_time.take() {
+                        let elapsed = last_write_poll_time.elapsed().unwrap();
+
+                        if elapsed >= *timeout {
+                            return Poll::Ready(Err(Error::new(
+                                ErrorKind::TimedOut,
+                                format!("File({}) read timeout", self.fd),
+                            )));
+                        }
+                    } else {
+                        // first time read
+                        self.last_write_poll_time = Some(SystemTime::now());
+                    }
+                }
+
+                self.poller
+                    .watch_writable_event_once(self.fd, waker, timeout);
+
+                return Poll::Pending;
+            } else if EISCONN == e.0 {
+                return Poll::Ready(Ok(()));
+            } else {
+                return Poll::Ready(Err(Error::from_raw_os_error(e.0)));
+            }
+        } else {
+            return Poll::Ready(Ok(()));
+        }
+    }
 }
 
-#[allow(unused)]
 impl<P> ReactorHandle for SocketHandle<P>
 where
     P: SysPoller + Unpin + Clone + 'static,
@@ -50,7 +171,7 @@ where
     type ReadBuffer<'cx> = SocketReadBuffer<'cx, P>;
     type WriteBuffer<'cx> = SocketWriteBuffer<'cx>;
 
-    fn poll_close(&mut self, waker: Waker) -> Poll<Result<()>> {
+    fn poll_close(&mut self, _waker: Waker) -> Poll<Result<()>> {
         use libc::*;
 
         if unsafe { close(self.fd) } < 0 {
