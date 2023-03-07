@@ -81,7 +81,7 @@ pub trait ReactorHandle {
     ) -> Poll<Result<usize>>;
 
     ///
-    fn poll_close(&mut self) -> Result<()>;
+    fn poll_close(&mut self, waker: Waker) -> Poll<Result<()>>;
 }
 
 /// Reactor opcode must implement this trait.

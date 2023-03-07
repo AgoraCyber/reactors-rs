@@ -68,9 +68,9 @@ where
 {
     fn poll_close(
         mut self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
+        cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        Poll::Ready(self.0.poll_close())
+        self.0.poll_close(cx.waker().clone())
     }
 
     fn poll_flush(

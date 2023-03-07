@@ -1,5 +1,5 @@
 use std::{
-    io::{Error, ErrorKind, SeekFrom},
+    io::{Error, ErrorKind, Result, SeekFrom},
     task::{Poll, Waker},
     time::SystemTime,
 };
@@ -47,11 +47,11 @@ where
 
     type WriteBuffer<'cx> = &'cx [u8];
 
-    fn poll_close(&mut self) -> std::io::Result<()> {
+    fn poll_close(&mut self, _waker: Waker) -> Poll<Result<()>> {
         if unsafe { libc::fclose(self.file) } < 0 {
-            Err(Error::last_os_error())
+            Poll::Ready(Err(Error::last_os_error()))
         } else {
-            Ok(())
+            Poll::Ready(Ok(()))
         }
     }
 
