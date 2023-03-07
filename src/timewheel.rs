@@ -2,18 +2,20 @@ use std::collections::HashMap;
 use std::task::Poll;
 // Time wheel algorithem impl
 
+#[derive(Debug)]
 struct Slot<T> {
     round: u64,
     t: T,
 }
 
-pub struct TimeWheel<T: Clone + Default> {
+#[derive(Debug)]
+pub struct TimeWheel<T> {
     hashed: HashMap<u64, Vec<Slot<T>>>,
     steps: u64,
     tick: u64,
 }
 
-impl<T: Clone + Default> TimeWheel<T> {
+impl<T> TimeWheel<T> {
     // create new hashed time wheel instance
     pub fn new(steps: u64) -> Self {
         TimeWheel {
