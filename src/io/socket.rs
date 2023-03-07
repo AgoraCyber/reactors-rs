@@ -2,9 +2,10 @@
 #[cfg_attr(target_family = "windows", path = "./socket/socket_win32.rs")]
 mod impls;
 pub use impls::*;
+
 pub mod extend;
 
-use super::poller::SysPoller;
+use super::poller::{sys, SysPoller};
 use std::net::SocketAddr;
 
 /// Socket [`ReadBuffer`](crate::reactor::ReactorHandle::ReadBuffer)
@@ -26,3 +27,7 @@ pub enum SocketWriteBuffer<'cx> {
     Stream(&'cx [u8]),
     Datagram(&'cx [u8], &'cx SocketAddr),
 }
+
+pub type TcpConnection = extend::TcpConnection<sys::SysPoller>;
+pub type TcpAcceptor = extend::TcpAcceptor<sys::SysPoller>;
+pub type UdpSocket = extend::UdpSocket<sys::SysPoller>;

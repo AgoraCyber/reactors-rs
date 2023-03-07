@@ -3,8 +3,8 @@
 mod impls;
 pub use impls::*;
 
-mod extend;
-pub use extend::*;
+pub mod extend;
 
-mod opcode;
-pub use opcode::*;
+use super::poller::sys;
+
+pub type File = extend::File<sys::SysPoller>;

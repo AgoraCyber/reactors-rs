@@ -1,6 +1,7 @@
 use std::{io::Result, task::Poll, time::Duration};
 
 use futures::{task::noop_waker, AsyncRead, AsyncSeek, AsyncWrite};
+use std::path::PathBuf;
 
 use crate::{
     io::poller::{PollerWrapper, SysPoller},
@@ -18,12 +19,12 @@ impl<P> File<P>
 where
     P: SysPoller + Unpin + Clone + 'static,
 {
-    pub fn create(poller: PollerWrapper<P>, path: &str) -> Result<Self> {
-        FileHandle::create(poller, path).map(|h| Self(h))
+    pub fn create<PB: Into<PathBuf>>(poller: PollerWrapper<P>, path: PB) -> Result<Self> {
+        FileHandle::create(poller, path.into()).map(|h| Self(h))
     }
 
-    pub fn open(poller: PollerWrapper<P>, path: &str) -> Result<Self> {
-        FileHandle::open(poller, path).map(|h| Self(h))
+    pub fn open<PB: Into<PathBuf>>(poller: PollerWrapper<P>, path: PB) -> Result<Self> {
+        FileHandle::open(poller, path.into()).map(|h| Self(h))
     }
 
     /// Convert file handle to [`AsyncRead`]
@@ -83,7 +84,7 @@ pub struct FileWriter<P>(FileHandle<P>, Option<Duration>)
 where
     P: SysPoller + Unpin + Clone + 'static;
 
-impl<P> AsyncWrite for FileReader<P>
+impl<P> AsyncWrite for FileWriter<P>
 where
     P: SysPoller + Unpin + Clone + 'static,
 {

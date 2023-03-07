@@ -1,6 +1,7 @@
 use std::{
     ffi::CString,
     io::{Error, ErrorKind, Result, SeekFrom},
+    path::PathBuf,
     ptr::null_mut,
     task::{Poll, Waker},
     time::SystemTime,
@@ -40,12 +41,12 @@ where
         }
     }
 
-    pub fn create(poller: PollerWrapper<P>, path: &str) -> Result<Self> {
-        Self::fopen(poller, "w+", path)
+    pub fn create(poller: PollerWrapper<P>, path: PathBuf) -> Result<Self> {
+        Self::fopen(poller, "w+", path.to_str().unwrap())
     }
 
-    pub fn open(poller: PollerWrapper<P>, path: &str) -> Result<Self> {
-        Self::fopen(poller, "a+", path)
+    pub fn open(poller: PollerWrapper<P>, path: PathBuf) -> Result<Self> {
+        Self::fopen(poller, "a+", path.to_str().unwrap())
     }
 
     fn fopen(poller: PollerWrapper<P>, mode: &str, path: &str) -> Result<Self> {

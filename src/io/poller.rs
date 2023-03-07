@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    fmt::Display,
     io::{Error, ErrorKind, Result},
     sync::{Arc, Mutex},
     task::{Poll, Waker},
@@ -20,9 +21,28 @@ pub enum PollOpCode {
     /// Poll event to register writable event
     Writable(sys::RawFd),
     /// Poll event to notify readable event
-    ReadableReady(sys::RawFd, Option<Error>),
+    ReadableReady(sys::RawFd, Result<()>),
     /// Poll event to notify writable event
-    WritableReady(sys::RawFd, Option<Error>),
+    WritableReady(sys::RawFd, Result<()>),
+}
+
+impl Display for PollOpCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Readable(v) => {
+                write!(f, "PollOpCode readable({})", v)
+            }
+            Self::Writable(v) => {
+                write!(f, "PollOpCode writable({})", v)
+            }
+            Self::ReadableReady(v, err) => {
+                write!(f, "PollOpCode readable ready({}), {:?}", v, err)
+            }
+            Self::WritableReady(v, err) => {
+                write!(f, "PollOpCode writable ready({}), {:?}", v, err)
+            }
+        }
+    }
 }
 
 /// System io multiplexer trait.
@@ -144,23 +164,23 @@ impl<P: SysPoller + Clone> Reactor for PollerWrapper<P> {
 
             for opcode in opcodes {
                 match opcode {
-                    PollOpCode::ReadableReady(fd, Some(err)) => {
+                    PollOpCode::ReadableReady(fd, Err(err)) => {
                         wakers.readables.remove(&fd);
 
                         log::error!("query fd({}) readable status returns error, {}", fd, err);
                     }
-                    PollOpCode::ReadableReady(fd, None) => {
+                    PollOpCode::ReadableReady(fd, Ok(())) => {
                         if let Some(waker) = wakers.readables.remove(&fd) {
                             removed_wakers.push(waker);
                             log::error!("fd({}) readable event raised,", fd);
                         }
                     }
-                    PollOpCode::WritableReady(fd, Some(err)) => {
+                    PollOpCode::WritableReady(fd, Err(err)) => {
                         wakers.writables.remove(&fd);
 
                         log::error!("query fd({}) writable status returns error, {}", fd, err);
                     }
-                    PollOpCode::WritableReady(fd, None) => {
+                    PollOpCode::WritableReady(fd, Ok(())) => {
                         if let Some(waker) = wakers.writables.remove(&fd) {
                             removed_wakers.push(waker);
                             log::error!("fd({}) writable event raised,", fd);
