@@ -37,10 +37,8 @@ async fn test_tcp() {
 
     assert!(read.poll_unpin(&mut noop_context()).is_pending());
 
-    async_std::task::sleep(Duration::from_secs(1)).await;
-
     // Trigger the timeout events.
-    while reactor.poll_once(Duration::from_secs(1)).unwrap() != 0 {}
+    while reactor.poll_once(Duration::from_secs(2)).unwrap() != 0 {}
 
     // expect timeout error
     assert_eq!(read.await.unwrap_err().kind(), ErrorKind::TimedOut);

@@ -1,8 +1,11 @@
-use std::task::Poll;
+use std::{io::ErrorKind, task::Poll, time::Duration};
 
 use futures::{FutureExt, SinkExt, TryStreamExt};
 use futures_test::task::noop_context;
-use reactors::io::{IoReactor, UdpSocket};
+use reactors::{
+    io::{IoReactor, UdpSocket},
+    Reactor,
+};
 
 #[futures_test::test]
 async fn udp_test() {
@@ -40,4 +43,27 @@ async fn udp_test() {
             }
         }
     }
+}
+
+#[futures_test::test]
+async fn udp_timeout() {
+    _ = pretty_env_logger::try_init();
+
+    let mut reactor = IoReactor::default();
+
+    let server_addr = "127.0.0.1:1812".parse().unwrap();
+
+    let server = UdpSocket::new(reactor.clone(), server_addr).unwrap();
+
+    let mut read = server.to_read_stream(1024, Duration::from_secs(1));
+
+    let mut try_next = read.try_next();
+
+    assert!(try_next.poll_unpin(&mut noop_context()).is_pending());
+
+    reactor.poll_once(Duration::from_secs(2)).unwrap();
+
+    let result = try_next.await;
+
+    assert_eq!(result.unwrap_err().kind(), ErrorKind::TimedOut);
 }
