@@ -1,11 +1,10 @@
 use std::{io::Result, net::SocketAddr, task::Poll, time::Duration};
 
-use futures::task::noop_waker;
 use futures::{Sink, Stream};
 
 use crate::ReactorHandle;
 
-use crate::io::poller::{PollerWrapper, SysPoller};
+use crate::io::poller::{PollerReactor, SysPoller};
 
 use super::super::{SocketHandle, SocketReadBuffer, SocketWriteBuffer};
 
@@ -24,21 +23,12 @@ where
     }
 }
 
-impl<P> Drop for UdpSocket<P>
-where
-    P: SysPoller + Unpin + Clone + 'static,
-{
-    fn drop(&mut self) {
-        _ = self.0.poll_close(noop_waker());
-    }
-}
-
 impl<P> UdpSocket<P>
 where
     P: SysPoller + Unpin + Clone + 'static,
 {
     /// Create new udp socket with [`listen_addr`](SocketAddr)
-    pub fn new(poller: PollerWrapper<P>, listen_addr: SocketAddr) -> Result<Self> {
+    pub fn new(poller: PollerReactor<P>, listen_addr: SocketAddr) -> Result<Self> {
         SocketHandle::udp(poller, listen_addr).map(|h| Self(h))
     }
 

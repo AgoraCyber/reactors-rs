@@ -2,14 +2,16 @@ use std::{
     io::{Error, ErrorKind, Result},
     mem::size_of,
     net::SocketAddr,
+    sync::Arc,
     task::{Poll, Waker},
     time::SystemTime,
 };
 
+use futures::task::noop_waker;
 use os_socketaddr::OsSocketAddr;
 
 use crate::{
-    io::poller::{PollerWrapper, SysPoller},
+    io::poller::{PollerReactor, SysPoller},
     ReactorHandle,
 };
 
@@ -22,10 +24,22 @@ pub struct SocketHandle<P>
 where
     P: SysPoller + Unpin + Clone + 'static,
 {
-    poller: PollerWrapper<P>,
-    fd: i32,
+    poller: PollerReactor<P>,
+    fd: Arc<i32>,
     last_read_poll_time: Option<SystemTime>,
     last_write_poll_time: Option<SystemTime>,
+}
+
+impl<P> Drop for SocketHandle<P>
+where
+    P: SysPoller + Unpin + Clone + 'static,
+{
+    fn drop(&mut self) {
+        // Only self
+        if Arc::strong_count(&self.fd) == 1 {
+            _ = self.poll_close(noop_waker());
+        }
+    }
 }
 
 impl<P> SocketHandle<P>
@@ -33,16 +47,16 @@ where
     P: SysPoller + Unpin + Clone + 'static,
 {
     /// Create socket handle from raw socket fd.
-    pub fn new(poller: PollerWrapper<P>, fd: i32) -> Self {
+    pub fn new(poller: PollerReactor<P>, fd: i32) -> Self {
         Self {
             poller,
-            fd,
+            fd: Arc::new(fd),
             last_read_poll_time: Default::default(),
             last_write_poll_time: Default::default(),
         }
     }
     /// Create udp socket with [`addr`](SocketAddr)
-    pub fn udp(poller: PollerWrapper<P>, addr: SocketAddr) -> Result<Self> {
+    pub fn udp(poller: PollerReactor<P>, addr: SocketAddr) -> Result<Self> {
         use libc::*;
 
         unsafe {
@@ -68,7 +82,7 @@ where
     }
 
     /// Create tcp socket
-    pub fn tcp(poller: PollerWrapper<P>, bind_addr: SocketAddr) -> Result<Self> {
+    pub fn tcp(poller: PollerReactor<P>, bind_addr: SocketAddr) -> Result<Self> {
         use libc::*;
 
         unsafe {
@@ -109,7 +123,7 @@ where
             let mut len = size_of::<c_int>() as u32;
 
             if libc::getsockopt(
-                self.fd,
+                *self.fd,
                 libc::SOL_SOCKET,
                 libc::SO_ERROR,
                 err_no.to_be_bytes().as_mut_ptr() as *mut libc::c_void,
@@ -123,7 +137,7 @@ where
                 return Poll::Ready(Err(Error::from_raw_os_error(err_no)));
             }
 
-            connect(self.fd, remote.as_ptr(), remote.len())
+            connect(*self.fd, remote.as_ptr(), remote.len())
         };
 
         if len < 0 {
@@ -150,7 +164,7 @@ where
                 }
 
                 self.poller
-                    .watch_writable_event_once(self.fd, waker, timeout);
+                    .watch_writable_event_once(*self.fd, waker, timeout);
 
                 return Poll::Pending;
             } else if EISCONN == e.0 {
@@ -174,7 +188,9 @@ where
     fn poll_close(&mut self, _waker: Waker) -> Poll<Result<()>> {
         use libc::*;
 
-        if unsafe { close(self.fd) } < 0 {
+        log::trace!("close socket({})", *self.fd);
+
+        if unsafe { close(*self.fd) } < 0 {
             Poll::Ready(Err(Error::last_os_error()))
         } else {
             Poll::Ready(Ok(()))
@@ -196,7 +212,7 @@ where
                 let mut len = remote.len() as u32;
 
                 let conn_fd = accept(
-                    self.fd,
+                    *self.fd,
                     remote.as_mut_ptr() as *mut sockaddr,
                     &mut len as *mut u32,
                 );
@@ -224,7 +240,7 @@ where
                 let mut len = remote_buff.len() as u32;
 
                 let len = recvfrom(
-                    self.fd,
+                    *self.fd,
                     buf.as_ptr() as *mut c_void,
                     buf.len(),
                     0,
@@ -246,7 +262,7 @@ where
                 len
             },
             SocketReadBuffer::Stream(buf) => unsafe {
-                recv(self.fd, (*buf).as_mut_ptr() as *mut c_void, buf.len(), 0)
+                recv(*self.fd, (*buf).as_mut_ptr() as *mut c_void, buf.len(), 0)
             },
         };
 
@@ -274,7 +290,7 @@ where
                 }
 
                 self.poller
-                    .watch_readable_event_once(self.fd, waker, timeout);
+                    .watch_readable_event_once(*self.fd, waker, timeout);
 
                 return Poll::Pending;
             } else {
@@ -298,7 +314,7 @@ where
                 let addr: OsSocketAddr = to.clone().into();
 
                 let len = sendto(
-                    self.fd,
+                    *self.fd,
                     buf.as_ptr() as *const c_void,
                     buf.len(),
                     0,
@@ -311,7 +327,7 @@ where
                 len
             },
             SocketWriteBuffer::Stream(buf) => unsafe {
-                send(self.fd, buf.as_ptr() as *const c_void, buf.len(), 0)
+                send(*self.fd, buf.as_ptr() as *const c_void, buf.len(), 0)
             },
         };
 
@@ -339,7 +355,7 @@ where
                 }
 
                 self.poller
-                    .watch_writable_event_once(self.fd, waker, timeout);
+                    .watch_writable_event_once(*self.fd, waker, timeout);
 
                 return Poll::Pending;
             } else {

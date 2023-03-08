@@ -4,6 +4,10 @@ pub mod file;
 pub mod poller;
 pub mod socket;
 
+pub use file::File;
+pub use poller::IoReactor;
+pub use socket::{TcpAcceptor, TcpConnection, UdpSocket};
+
 #[cfg(target_family = "unix")]
 pub(crate) unsafe fn noblock(fd: i32) -> std::io::Result<()> {
     use libc::*;

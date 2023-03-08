@@ -69,14 +69,14 @@ impl EventWakers {
 
 /// System native io multiplexer wrapper.
 #[derive(Debug, Clone)]
-pub struct PollerWrapper<P: SysPoller + Clone> {
+pub struct PollerReactor<P: SysPoller + Clone> {
     wakers: Arc<Mutex<EventWakers>>,
     sys_poller: P,
     tick_duration: Duration,
     last_poll_time: SystemTime,
 }
 
-impl<P> Default for PollerWrapper<P>
+impl<P> Default for PollerReactor<P>
 where
     P: SysPoller + Clone + Default,
 {
@@ -90,7 +90,7 @@ where
     }
 }
 
-impl<P: SysPoller + Clone> PollerWrapper<P> {
+impl<P: SysPoller + Clone> PollerReactor<P> {
     /// Register a once time watcher of readable event for [`fd`](RawFd)
     pub fn watch_readable_event_once(
         &mut self,
@@ -132,7 +132,7 @@ impl<P: SysPoller + Clone> PollerWrapper<P> {
     }
 }
 
-impl<P: SysPoller + Clone> Reactor for PollerWrapper<P> {
+impl<P: SysPoller + Clone> Reactor for PollerReactor<P> {
     /// Poll io events once.
     fn poll_once(&mut self, timeout: Duration) -> Result<usize> {
         let opcodes = {
@@ -232,4 +232,4 @@ impl<P: SysPoller + Clone> Reactor for PollerWrapper<P> {
 }
 
 /// Default io multiplexer
-pub type Poller = PollerWrapper<sys::SysPoller>;
+pub type IoReactor = PollerReactor<sys::SysPoller>;

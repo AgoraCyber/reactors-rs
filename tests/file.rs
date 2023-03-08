@@ -1,16 +1,18 @@
 use std::{io::SeekFrom, path::PathBuf};
 
-use reactors::io::{file::File, poller::Poller};
+use reactors::io::{File, IoReactor};
 
 use futures::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 #[futures_test::test]
 async fn test_file() {
-    let poller = Poller::default();
+    _ = pretty_env_logger::try_init();
+
+    let reactor = IoReactor::default();
 
     let dir: PathBuf = env!("CARGO_TARGET_TMPDIR").into();
 
-    let file = File::create(poller.clone(), dir.join("test")).unwrap();
+    let file = File::create(reactor, dir.join("test")).unwrap();
 
     let mut write_stream = file.to_write_stream(None);
 

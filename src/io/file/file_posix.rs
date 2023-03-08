@@ -3,14 +3,16 @@ use std::{
     io::{Error, ErrorKind, Result, SeekFrom},
     path::PathBuf,
     ptr::null_mut,
+    sync::Arc,
     task::{Poll, Waker},
     time::SystemTime,
 };
 
 use errno::set_errno;
+use futures::task::noop_waker;
 
 use crate::{
-    io::poller::{PollerWrapper, SysPoller},
+    io::poller::{PollerReactor, SysPoller},
     ReactorHandle, ReactorHandleSeekable,
 };
 
@@ -19,11 +21,23 @@ pub struct FileHandle<P>
 where
     P: SysPoller + Unpin + Clone + 'static,
 {
-    poller: PollerWrapper<P>,
-    fd: i32,
+    poller: PollerReactor<P>,
+    fd: Arc<i32>,
     file: *mut libc::FILE,
     last_read_poll_time: Option<SystemTime>,
     last_write_poll_time: Option<SystemTime>,
+}
+
+impl<P> Drop for FileHandle<P>
+where
+    P: SysPoller + Unpin + Clone + 'static,
+{
+    fn drop(&mut self) {
+        // Only self
+        if Arc::strong_count(&self.fd) == 1 {
+            _ = self.poll_close(noop_waker());
+        }
+    }
 }
 
 impl<P> FileHandle<P>
@@ -31,25 +45,25 @@ where
     P: SysPoller + Unpin + Clone + 'static,
 {
     /// Create file handle with poller and posix [`FILE`](libc::FILE)
-    pub fn new(poller: PollerWrapper<P>, file: *mut libc::FILE) -> Self {
+    pub fn new(poller: PollerReactor<P>, file: *mut libc::FILE) -> Self {
         Self {
             poller,
-            fd: unsafe { libc::fileno(file) },
+            fd: Arc::new(unsafe { libc::fileno(file) }),
             file,
             last_read_poll_time: Default::default(),
             last_write_poll_time: Default::default(),
         }
     }
 
-    pub fn create(poller: PollerWrapper<P>, path: PathBuf) -> Result<Self> {
+    pub fn create(poller: PollerReactor<P>, path: PathBuf) -> Result<Self> {
         Self::fopen(poller, "w+", path.to_str().unwrap())
     }
 
-    pub fn open(poller: PollerWrapper<P>, path: PathBuf) -> Result<Self> {
+    pub fn open(poller: PollerReactor<P>, path: PathBuf) -> Result<Self> {
         Self::fopen(poller, "a+", path.to_str().unwrap())
     }
 
-    fn fopen(poller: PollerWrapper<P>, mode: &str, path: &str) -> Result<Self> {
+    fn fopen(poller: PollerReactor<P>, mode: &str, path: &str) -> Result<Self> {
         let open_mode = CString::new(mode).unwrap();
 
         let path = CString::new(path).unwrap();
@@ -90,6 +104,8 @@ where
     type WriteBuffer<'cx> = &'cx [u8];
 
     fn poll_close(&mut self, _waker: Waker) -> Poll<Result<()>> {
+        log::trace!("close file({})", *self.fd);
+
         if unsafe { libc::fclose(self.file) } < 0 {
             Poll::Ready(Err(Error::last_os_error()))
         } else {
@@ -106,7 +122,7 @@ where
         use libc::*;
 
         unsafe {
-            let len = read(self.fd, buffer.as_mut_ptr() as *mut c_void, buffer.len());
+            let len = read(*self.fd, buffer.as_mut_ptr() as *mut c_void, buffer.len());
 
             if len < 0 {
                 let e = errno::errno();
@@ -131,7 +147,7 @@ where
                     }
 
                     self.poller
-                        .watch_readable_event_once(self.fd, waker, timeout);
+                        .watch_readable_event_once(*self.fd, waker, timeout);
 
                     return Poll::Pending;
                 } else {
@@ -152,7 +168,7 @@ where
         use libc::*;
 
         unsafe {
-            let len = write(self.fd, buffer.as_ptr() as *const c_void, buffer.len());
+            let len = write(*self.fd, buffer.as_ptr() as *const c_void, buffer.len());
 
             if len < 0 {
                 let e = errno::errno();
@@ -177,7 +193,7 @@ where
                     }
 
                     self.poller
-                        .watch_writable_event_once(self.fd, waker, timeout);
+                        .watch_writable_event_once(*self.fd, waker, timeout);
 
                     return Poll::Pending;
                 } else {

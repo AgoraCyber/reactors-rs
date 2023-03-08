@@ -1,10 +1,10 @@
 use std::{io::Result, task::Poll, time::Duration};
 
-use futures::{task::noop_waker, AsyncRead, AsyncSeek, AsyncWrite};
+use futures::{AsyncRead, AsyncSeek, AsyncWrite};
 use std::path::PathBuf;
 
 use crate::{
-    io::poller::{PollerWrapper, SysPoller},
+    io::poller::{PollerReactor, SysPoller},
     ReactorHandle, ReactorHandleSeekable,
 };
 
@@ -19,11 +19,11 @@ impl<P> File<P>
 where
     P: SysPoller + Unpin + Clone + 'static,
 {
-    pub fn create<PB: Into<PathBuf>>(poller: PollerWrapper<P>, path: PB) -> Result<Self> {
+    pub fn create<PB: Into<PathBuf>>(poller: PollerReactor<P>, path: PB) -> Result<Self> {
         FileHandle::create(poller, path.into()).map(|h| Self(h))
     }
 
-    pub fn open<PB: Into<PathBuf>>(poller: PollerWrapper<P>, path: PB) -> Result<Self> {
+    pub fn open<PB: Into<PathBuf>>(poller: PollerReactor<P>, path: PB) -> Result<Self> {
         FileHandle::open(poller, path.into()).map(|h| Self(h))
     }
 
@@ -35,15 +35,6 @@ where
     /// Convert file handle to [`AsyncRead`]
     pub fn to_write_stream(&self, timeout: Option<Duration>) -> FileWriter<P> {
         FileWriter(self.0.clone(), timeout)
-    }
-}
-
-impl<P> Drop for File<P>
-where
-    P: SysPoller + Unpin + Clone + 'static,
-{
-    fn drop(&mut self) {
-        _ = self.0.poll_close(noop_waker());
     }
 }
 

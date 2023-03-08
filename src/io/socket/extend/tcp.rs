@@ -1,12 +1,11 @@
 use std::io::Error;
 use std::{io::Result, net::SocketAddr, task::Poll, time::Duration};
 
-use futures::task::noop_waker;
 use futures::{AsyncRead, AsyncWrite, Future, Stream};
 
 use crate::ReactorHandle;
 
-use crate::io::poller::{PollerWrapper, SysPoller};
+use crate::io::poller::{PollerReactor, SysPoller};
 
 use super::super::{SocketHandle, SocketReadBuffer, SocketWriteBuffer};
 
@@ -25,21 +24,12 @@ where
     }
 }
 
-impl<P> Drop for TcpConnection<P>
-where
-    P: SysPoller + Unpin + Clone + 'static,
-{
-    fn drop(&mut self) {
-        _ = self.0.poll_close(noop_waker());
-    }
-}
-
 impl<P> TcpConnection<P>
 where
     P: SysPoller + Unpin + Clone + 'static,
 {
     pub fn connect(
-        poller: PollerWrapper<P>,
+        poller: PollerReactor<P>,
         remote: SocketAddr,
         bind_addr: Option<SocketAddr>,
     ) -> TcpConnect<P> {
@@ -91,17 +81,6 @@ where
     handle: Option<SocketHandle<P>>,
     remote: SocketAddr,
     timeout: Option<Duration>,
-}
-
-impl<P> Drop for TcpConnect<P>
-where
-    P: SysPoller + Unpin + Clone + 'static,
-{
-    fn drop(&mut self) {
-        if let Some(h) = &mut self.handle {
-            _ = h.poll_close(noop_waker());
-        }
-    }
 }
 
 impl<P> Future for TcpConnect<P>
@@ -206,21 +185,12 @@ pub struct TcpAcceptor<P>(SocketHandle<P>)
 where
     P: SysPoller + Unpin + Clone + 'static;
 
-impl<P> Drop for TcpAcceptor<P>
-where
-    P: SysPoller + Unpin + Clone + 'static,
-{
-    fn drop(&mut self) {
-        _ = self.0.poll_close(noop_waker());
-    }
-}
-
 impl<P> TcpAcceptor<P>
 where
     P: SysPoller + Unpin + Clone + 'static,
 {
     /// Create new tcp listener with [`listen_addr`](SocketAddr)
-    pub fn new(poller: PollerWrapper<P>, listen_addr: SocketAddr) -> Result<Self> {
+    pub fn new(poller: PollerReactor<P>, listen_addr: SocketAddr) -> Result<Self> {
         SocketHandle::tcp(poller, listen_addr).map(|h| Self(h))
     }
 }
