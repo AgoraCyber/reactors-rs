@@ -36,6 +36,7 @@ impl Display for PollRequest {
 }
 
 /// Poll response message
+///
 #[derive(Debug)]
 pub enum PollResponse {
     /// Poll event to notify readable event
@@ -48,10 +49,10 @@ impl Display for PollResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ReadableReady(v, err) => {
-                write!(f, "PollOpCode readable ready({}), {:?}", v, err)
+                write!(f, "PollOpCode readable ready({:?}), {:?}", v, err)
             }
             Self::WritableReady(v, err) => {
-                write!(f, "PollOpCode writable ready({}), {:?}", v, err)
+                write!(f, "PollOpCode writable ready({:?}), {:?}", v, err)
             }
         }
     }
