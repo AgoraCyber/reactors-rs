@@ -36,7 +36,7 @@ where
     pub fn to_read_stream<T: Into<Option<Duration>>>(
         &self,
         buff_size: usize,
-        timeout: Option<Duration>,
+        timeout: T,
     ) -> UdpSocketReader<P> {
         UdpSocketReader {
             handle: self.0.clone(),
@@ -46,10 +46,7 @@ where
     }
 
     /// Convert udp socket to write stream.
-    pub fn to_write_stream<T: Into<Option<Duration>>>(
-        &self,
-        timeout: Option<Duration>,
-    ) -> UdpSocketWriter<P> {
+    pub fn to_write_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> UdpSocketWriter<P> {
         UdpSocketWriter {
             handle: self.0.clone(),
             timeout: timeout.into(),
