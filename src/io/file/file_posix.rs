@@ -1,11 +1,10 @@
 use std::{
     ffi::CString,
-    io::{Error, ErrorKind, Result, SeekFrom},
+    io::{Error, Result, SeekFrom},
     path::PathBuf,
     ptr::null_mut,
     sync::Arc,
     task::{Poll, Waker},
-    time::SystemTime,
 };
 
 use errno::set_errno;
@@ -24,8 +23,6 @@ where
     poller: PollerReactor<P>,
     fd: Arc<i32>,
     file: *mut libc::FILE,
-    last_read_poll_time: Option<SystemTime>,
-    last_write_poll_time: Option<SystemTime>,
 }
 
 impl<P> Drop for FileHandle<P>
@@ -50,8 +47,6 @@ where
             poller,
             fd: Arc::new(unsafe { libc::fileno(file) }),
             file,
-            last_read_poll_time: Default::default(),
-            last_write_poll_time: Default::default(),
         }
     }
 
@@ -129,27 +124,13 @@ where
                 set_errno(e);
 
                 if e.0 == EAGAIN || e.0 == EWOULDBLOCK {
-                    if let Some(timeout) = &timeout {
-                        // second time read .
-                        if let Some(last_read_poll_time) = self.last_read_poll_time.take() {
-                            let elapsed = last_read_poll_time.elapsed().unwrap();
-
-                            if elapsed >= *timeout {
-                                return Poll::Ready(Err(Error::new(
-                                    ErrorKind::TimedOut,
-                                    format!("File({}) read timeout", self.fd),
-                                )));
-                            }
-                        } else {
-                            // first time read
-                            self.last_read_poll_time = Some(SystemTime::now());
-                        }
-                    }
-
-                    self.poller
-                        .watch_readable_event_once(*self.fd, waker, timeout);
-
-                    return Poll::Pending;
+                    return match self
+                        .poller
+                        .watch_readable_event_once(*self.fd, waker, timeout)
+                    {
+                        Ok(_) => Poll::Pending,
+                        Err(err) => Poll::Ready(Err(err)),
+                    };
                 } else {
                     return Poll::Ready(Err(Error::from_raw_os_error(e.0)));
                 }
@@ -175,27 +156,13 @@ where
                 set_errno(e);
 
                 if e.0 == EAGAIN || e.0 == EWOULDBLOCK {
-                    if let Some(timeout) = &timeout {
-                        // second time write .
-                        if let Some(last_write_poll_time) = self.last_write_poll_time.take() {
-                            let elapsed = last_write_poll_time.elapsed().unwrap();
-
-                            if elapsed >= *timeout {
-                                return Poll::Ready(Err(Error::new(
-                                    ErrorKind::TimedOut,
-                                    format!("File({}) write timeout", self.fd),
-                                )));
-                            }
-                        } else {
-                            // first time write
-                            self.last_write_poll_time = Some(SystemTime::now());
-                        }
-                    }
-
-                    self.poller
-                        .watch_writable_event_once(*self.fd, waker, timeout);
-
-                    return Poll::Pending;
+                    return match self
+                        .poller
+                        .watch_writable_event_once(*self.fd, waker, timeout)
+                    {
+                        Ok(_) => Poll::Pending,
+                        Err(err) => Poll::Ready(Err(err)),
+                    };
                 } else {
                     return Poll::Ready(Err(Error::from_raw_os_error(e.0)));
                 }

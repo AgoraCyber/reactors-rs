@@ -14,19 +14,15 @@ use crate::{timewheel::TimeWheel, Reactor};
 pub mod sys;
 
 /// Poll opcode.
-#[derive(Debug)]
-pub enum PollOpCode {
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
+pub enum PollRequest {
     /// Poll event to register readable event
     Readable(sys::RawFd),
     /// Poll event to register writable event
     Writable(sys::RawFd),
-    /// Poll event to notify readable event
-    ReadableReady(sys::RawFd, Result<()>),
-    /// Poll event to notify writable event
-    WritableReady(sys::RawFd, Result<()>),
 }
 
-impl Display for PollOpCode {
+impl Display for PollRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Readable(v) => {
@@ -35,6 +31,22 @@ impl Display for PollOpCode {
             Self::Writable(v) => {
                 write!(f, "PollOpCode writable({})", v)
             }
+        }
+    }
+}
+
+/// Poll response message
+#[derive(Debug)]
+pub enum PollResponse {
+    /// Poll event to notify readable event
+    ReadableReady(sys::RawFd, Result<()>),
+    /// Poll event to notify writable event
+    WritableReady(sys::RawFd, Result<()>),
+}
+
+impl Display for PollResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
             Self::ReadableReady(v, err) => {
                 write!(f, "PollOpCode readable ready({}), {:?}", v, err)
             }
@@ -47,21 +59,25 @@ impl Display for PollOpCode {
 
 /// System io multiplexer trait.
 pub trait SysPoller {
-    fn poll_once(&mut self, opcodes: &[PollOpCode], timeout: Duration) -> Result<Vec<PollOpCode>>;
+    fn poll_once(
+        &mut self,
+        opcodes: &[PollRequest],
+        timeout: Duration,
+    ) -> Result<Vec<PollResponse>>;
 }
 
 #[derive(Debug)]
 struct EventWakers {
-    readables: HashMap<sys::RawFd, Waker>,
-    writables: HashMap<sys::RawFd, Waker>,
-    time_wheel: TimeWheel<PollOpCode>,
+    reqs: HashMap<PollRequest, Waker>,
+    resps: HashMap<PollRequest, Result<()>>,
+    time_wheel: TimeWheel<PollRequest>,
 }
 
 impl EventWakers {
     fn new(steps: u64) -> Self {
         Self {
-            readables: Default::default(),
-            writables: Default::default(),
+            reqs: Default::default(),
+            resps: Default::default(),
             time_wheel: TimeWheel::new(steps),
         }
     }
@@ -97,16 +113,24 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
         fd: sys::RawFd,
         waker: Waker,
         timeout: Option<Duration>,
-    ) {
+    ) -> Result<()> {
         let mut wakers = self.wakers.lock().unwrap();
 
-        wakers.readables.insert(fd, waker);
+        let request = PollRequest::Readable(fd);
+
+        if let Some(result) = wakers.resps.remove(&request) {
+            return result;
+        }
+
+        wakers.reqs.insert(request, waker);
 
         if let Some(timeout) = timeout {
             let timeout = (timeout.as_millis() / self.tick_duration.as_millis()) as u64;
 
-            wakers.time_wheel.add(timeout, PollOpCode::Readable(fd));
+            wakers.time_wheel.add(timeout, request);
         }
+
+        Ok(())
     }
 
     /// Register a once time watcher of writable event for [`fd`](RawFd)
@@ -115,10 +139,16 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
         fd: sys::RawFd,
         waker: Waker,
         timeout: Option<Duration>,
-    ) {
+    ) -> Result<()> {
         let mut wakers = self.wakers.lock().unwrap();
 
-        wakers.writables.insert(fd, waker);
+        let request = PollRequest::Writable(fd);
+
+        if let Some(result) = wakers.resps.remove(&request) {
+            return result;
+        }
+
+        wakers.reqs.insert(request, waker);
 
         if let Some(timeout) = timeout {
             let mut timeout = (timeout.as_millis() / self.tick_duration.as_millis()) as u64;
@@ -127,8 +157,10 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
                 timeout = 1;
             }
 
-            wakers.time_wheel.add(timeout, PollOpCode::Writable(fd));
+            wakers.time_wheel.add(timeout, request);
         }
+
+        Ok(())
     }
 }
 
@@ -140,12 +172,8 @@ impl<P: SysPoller + Clone> Reactor for PollerReactor<P> {
 
             let mut opcodes = vec![];
 
-            for (fd, _) in &wakers.readables {
-                opcodes.push(PollOpCode::Readable(*fd));
-            }
-
-            for (fd, _) in &wakers.writables {
-                opcodes.push(PollOpCode::Writable(*fd));
+            for (req, _) in &wakers.reqs {
+                opcodes.push(*req);
             }
 
             opcodes
@@ -164,33 +192,24 @@ impl<P: SysPoller + Clone> Reactor for PollerReactor<P> {
 
             for opcode in opcodes {
                 match opcode {
-                    PollOpCode::ReadableReady(fd, Err(err)) => {
-                        wakers.readables.remove(&fd);
+                    PollResponse::ReadableReady(fd, result) => {
+                        let req = PollRequest::Readable(fd);
 
-                        log::error!("query fd({}) readable status returns error, {}", fd, err);
-                    }
-                    PollOpCode::ReadableReady(fd, Ok(())) => {
-                        if let Some(waker) = wakers.readables.remove(&fd) {
+                        if let Some(waker) = wakers.reqs.remove(&req) {
                             removed_wakers.push(waker);
-                            log::error!("fd({}) readable event raised,", fd);
                         }
-                    }
-                    PollOpCode::WritableReady(fd, Err(err)) => {
-                        wakers.writables.remove(&fd);
 
-                        log::error!("query fd({}) writable status returns error, {}", fd, err);
+                        wakers.resps.insert(req, result);
                     }
-                    PollOpCode::WritableReady(fd, Ok(())) => {
-                        if let Some(waker) = wakers.writables.remove(&fd) {
+
+                    PollResponse::WritableReady(fd, result) => {
+                        let req = PollRequest::Writable(fd);
+
+                        if let Some(waker) = wakers.reqs.remove(&req) {
                             removed_wakers.push(waker);
-                            log::error!("fd({}) writable event raised,", fd);
                         }
-                    }
-                    _ => {
-                        return Err(Error::new(
-                            ErrorKind::InvalidData,
-                            format!("Underlay sys poller returns invalid opcode: {:?}", opcode),
-                        ));
+
+                        wakers.resps.insert(req, result);
                     }
                 }
             }
@@ -198,22 +217,18 @@ impl<P: SysPoller + Clone> Reactor for PollerReactor<P> {
             for _ in 0..steps {
                 match wakers.time_wheel.tick() {
                     Poll::Ready(opcodes) => {
-                        for opcode in opcodes {
-                            match opcode {
-                                PollOpCode::Readable(fd) => {
-                                    if let Some(waker) = wakers.readables.remove(&fd) {
-                                        removed_wakers.push(waker);
-                                        log::error!("fd({}) read event timeout,", fd);
-                                    }
-                                }
-                                PollOpCode::Writable(fd) => {
-                                    if let Some(waker) = wakers.writables.remove(&fd) {
-                                        removed_wakers.push(waker);
-                                        log::error!("fd({}) writable event timeout,", fd);
-                                    }
-                                }
-                                _ => {}
+                        for req in opcodes {
+                            if let Some(waker) = wakers.reqs.remove(&req) {
+                                removed_wakers.push(waker);
                             }
+
+                            wakers.resps.insert(
+                                req,
+                                Err(Error::new(
+                                    ErrorKind::TimedOut,
+                                    format!("poll request({}) timeout", req),
+                                )),
+                            );
                         }
                     }
                     Poll::Pending => {}
