@@ -36,7 +36,10 @@ where
         let bind_addr = if let Some(bind_addr) = bind_addr {
             bind_addr
         } else {
-            "0.0.0.0:0".parse().unwrap()
+            match remote {
+                SocketAddr::V4(_) => "0.0.0.0:0".parse().unwrap(),
+                SocketAddr::V6(_) => "[::]:0".parse().unwrap(),
+            }
         };
 
         match SocketHandle::tcp(poller, bind_addr) {
@@ -56,18 +59,18 @@ where
     }
 
     /// Convert tcp connection to read stream
-    pub fn to_read_stream(&self, timeout: Option<Duration>) -> TcpConnectionReader<P> {
+    pub fn to_read_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> TcpConnectionReader<P> {
         TcpConnectionReader {
             handle: self.0.clone(),
-            timeout,
+            timeout: timeout.into(),
         }
     }
 
     /// Convert tcp connection to write stream.
-    pub fn to_write_stream(&self, timeout: Option<Duration>) -> TcpConnectionWriter<P> {
+    pub fn to_write_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> TcpConnectionWriter<P> {
         TcpConnectionWriter {
             handle: self.0.clone(),
-            timeout,
+            timeout: timeout.into(),
         }
     }
 }
@@ -191,7 +194,11 @@ where
 {
     /// Create new tcp listener with [`listen_addr`](SocketAddr)
     pub fn new(poller: PollerReactor<P>, listen_addr: SocketAddr) -> Result<Self> {
-        SocketHandle::tcp(poller, listen_addr).map(|h| Self(h))
+        let mut handle = SocketHandle::tcp(poller, listen_addr)?;
+
+        handle.listen()?;
+
+        Ok(Self(handle))
     }
 }
 

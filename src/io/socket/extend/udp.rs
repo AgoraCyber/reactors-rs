@@ -33,23 +33,26 @@ where
     }
 
     /// Convert udp socket to read stream
-    pub fn to_read_stream(
+    pub fn to_read_stream<T: Into<Option<Duration>>>(
         &self,
         buff_size: usize,
         timeout: Option<Duration>,
     ) -> UdpSocketReader<P> {
         UdpSocketReader {
             handle: self.0.clone(),
-            timeout,
+            timeout: timeout.into(),
             buff_size,
         }
     }
 
     /// Convert udp socket to write stream.
-    pub fn to_write_stream(&self, timeout: Option<Duration>) -> UdpSocketWriter<P> {
+    pub fn to_write_stream<T: Into<Option<Duration>>>(
+        &self,
+        timeout: Option<Duration>,
+    ) -> UdpSocketWriter<P> {
         UdpSocketWriter {
             handle: self.0.clone(),
-            timeout,
+            timeout: timeout.into(),
             buff: None,
         }
     }

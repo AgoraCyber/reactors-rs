@@ -28,13 +28,13 @@ where
     }
 
     /// Convert file handle to [`AsyncRead`]
-    pub fn to_read_stream(&self, timeout: Option<Duration>) -> FileReader<P> {
-        FileReader(self.0.clone(), timeout)
+    pub fn to_read_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> FileReader<P> {
+        FileReader(self.0.clone(), timeout.into())
     }
 
     /// Convert file handle to [`AsyncRead`]
-    pub fn to_write_stream(&self, timeout: Option<Duration>) -> FileWriter<P> {
-        FileWriter(self.0.clone(), timeout)
+    pub fn to_write_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> FileWriter<P> {
+        FileWriter(self.0.clone(), timeout.into())
     }
 }
 

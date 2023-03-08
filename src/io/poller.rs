@@ -107,6 +107,15 @@ where
 }
 
 impl<P: SysPoller + Clone> PollerReactor<P> {
+    /// Create new poller reactor instance with [`SysPoller`] instance.
+    pub fn new(sys_poller: P) -> Self {
+        Self {
+            wakers: Arc::new(Mutex::new(EventWakers::new(3600))),
+            sys_poller,
+            tick_duration: Duration::from_secs(1),
+            last_poll_time: SystemTime::now(),
+        }
+    }
     /// Register a once time watcher of readable event for [`fd`](RawFd)
     pub fn watch_readable_event_once(
         &mut self,
@@ -241,6 +250,8 @@ impl<P: SysPoller + Clone> Reactor for PollerReactor<P> {
         for waker in &wakers {
             waker.wake_by_ref();
         }
+
+        log::trace!("poll_once({})", wakers.len());
 
         Ok(wakers.len())
     }

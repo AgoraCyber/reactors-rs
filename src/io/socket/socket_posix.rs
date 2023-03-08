@@ -102,6 +102,33 @@ where
         }
     }
 
+    /// Tcep acceptor socket start listening incoming connection
+    pub fn listen(&mut self) -> Result<()> {
+        use libc::*;
+
+        unsafe {
+            let on: c_int = 1;
+
+            let len = size_of::<c_int>() as u32;
+
+            if setsockopt(
+                *self.fd,
+                SOL_SOCKET,
+                SO_REUSEADDR,
+                on.to_be_bytes().as_ptr() as *const libc::c_void,
+                len,
+            ) < 0
+            {
+                return Err(Error::last_os_error());
+            }
+
+            if listen(*self.fd, SOMAXCONN) < 0 {
+                return Err(Error::last_os_error());
+            } else {
+                Ok(())
+            }
+        }
+    }
     pub fn poll_connect(
         &mut self,
         remote: SocketAddr,
@@ -247,6 +274,8 @@ where
             },
         };
 
+        log::trace!("socket({}) read bytes({})", *self.fd, len);
+
         if len < 0 {
             let e = errno();
 
@@ -297,6 +326,8 @@ where
                 send(*self.fd, buf.as_ptr() as *const c_void, buf.len(), 0)
             },
         };
+
+        log::trace!("socket({}) write bytes({})", *self.fd, len);
 
         if len < 0 {
             let e = errno();
