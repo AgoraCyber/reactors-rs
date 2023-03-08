@@ -22,6 +22,15 @@ pub enum PollRequest {
     Writable(sys::RawFd),
 }
 
+impl PollRequest {
+    pub fn into_response(self, result: Result<()>) -> PollResponse {
+        match self {
+            Self::Readable(fd) => PollResponse::ReadableReady(fd, result),
+            Self::Writable(fd) => PollResponse::WritableReady(fd, result),
+        }
+    }
+}
+
 impl Display for PollRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -60,11 +69,15 @@ impl Display for PollResponse {
 
 /// System io multiplexer trait.
 pub trait SysPoller {
+    #[cfg(target_family = "unix")]
     fn poll_once(
         &mut self,
         opcodes: &[PollRequest],
         timeout: Duration,
     ) -> Result<Vec<PollResponse>>;
+
+    #[cfg(target_family = "windows")]
+    fn poll_once(&mut self, timeout: Duration) -> Result<Vec<PollResponse>>;
 }
 
 #[derive(Debug)]
@@ -172,11 +185,9 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
 
         Ok(())
     }
-}
 
-impl<P: SysPoller + Clone> Reactor for PollerReactor<P> {
-    /// Poll io events once.
-    fn poll_once(&mut self, timeout: Duration) -> Result<usize> {
+    #[cfg(target_family = "unix")]
+    fn do_poll_once(&mut self, timeout: Duration) -> Result<Vec<PollResponse>> {
         let opcodes = {
             let wakers = self.wakers.lock().unwrap();
 
@@ -189,7 +200,19 @@ impl<P: SysPoller + Clone> Reactor for PollerReactor<P> {
             opcodes
         };
 
-        let opcodes = self.sys_poller.poll_once(&opcodes, timeout)?;
+        self.sys_poller.poll_once(&opcodes, timeout)
+    }
+
+    #[cfg(target_family = "windows")]
+    fn do_poll_once(&mut self, timeout: Duration) -> Result<Vec<PollResponse>> {
+        self.sys_poller.poll_once(timeout)
+    }
+}
+
+impl<P: SysPoller + Clone> Reactor for PollerReactor<P> {
+    /// Poll io events once.
+    fn poll_once(&mut self, timeout: Duration) -> Result<usize> {
+        let resps = self.do_poll_once(timeout)?;
 
         let wakers = {
             let elapsed = self.last_poll_time.elapsed().unwrap();
@@ -200,7 +223,7 @@ impl<P: SysPoller + Clone> Reactor for PollerReactor<P> {
 
             let mut removed_wakers = vec![];
 
-            for opcode in opcodes {
+            for opcode in resps {
                 match opcode {
                     PollResponse::ReadableReady(fd, result) => {
                         let req = PollRequest::Readable(fd);

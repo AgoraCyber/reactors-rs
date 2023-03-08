@@ -1,12 +1,29 @@
 use std::{
     io::{Error, Result},
+    ptr::null_mut,
     sync::Once,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
-use windows::Win32::{Foundation::*, Networking::WinSock::*, System::IO::CreateIoCompletionPort};
+use windows::Win32::{
+    Foundation::*,
+    Networking::WinSock::*,
+    System::IO::{CreateIoCompletionPort, GetQueuedCompletionStatus, OVERLAPPED},
+};
 
 use crate::io::poller::{PollRequest, PollResponse};
+
+#[repr(C)]
+pub struct PollerOVERLAPPED {
+    overlapped: OVERLAPPED,
+    request: PollRequest,
+}
+
+impl PollerOVERLAPPED {
+    pub fn new() -> Self {
+        unsafe { ::core::mem::zeroed() }
+    }
+}
 
 /// System poller with iocp backend.
 #[derive(Clone, Debug)]
@@ -44,11 +61,68 @@ impl SysPoller {
 }
 
 impl crate::io::poller::SysPoller for SysPoller {
-    fn poll_once(
-        &mut self,
-        opcodes: &[PollRequest],
-        timeout: Duration,
-    ) -> Result<Vec<PollResponse>> {
-        unimplemented!()
+    fn poll_once(&mut self, timeout: Duration) -> Result<Vec<PollResponse>> {
+        let start_time = SystemTime::now();
+
+        let mut resps = vec![];
+
+        loop {
+            unsafe {
+                let mut transferred = 0u32;
+                let mut completionkey = 0usize;
+
+                let mut overlapped: *mut PollerOVERLAPPED = null_mut();
+
+                let elapsed = start_time.elapsed().unwrap();
+
+                if elapsed >= timeout {
+                    break;
+                }
+
+                let real_timeout = timeout - elapsed;
+
+                if !GetQueuedCompletionStatus(
+                    self.iocp,
+                    &mut transferred,
+                    &mut completionkey,
+                    (&mut overlapped).cast::<*mut OVERLAPPED>(),
+                    real_timeout.as_millis() as u32,
+                )
+                .as_bool()
+                {
+                    // Maybe completion port handle closed
+                    if overlapped == null_mut() {
+                        return Err(Error::last_os_error());
+                    }
+
+                    let overlapped = Box::from_raw(overlapped);
+
+                    resps.push(
+                        overlapped
+                            .request
+                            .into_response(Err(Error::last_os_error())),
+                    );
+                } else {
+                    let overlapped = Box::from_raw(overlapped);
+
+                    resps.push(overlapped.request.into_response(Ok(())));
+                }
+            }
+
+            if start_time.elapsed().unwrap() > timeout {
+                break;
+            }
+        }
+
+        log::trace!(
+            "poll_once: fired [{}]",
+            resps
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+
+        Ok(resps)
     }
 }
