@@ -59,3 +59,18 @@ async fn test_tcp() {
 
     assert_eq!(&buff[..11], b"hello world");
 }
+
+#[futures_test::test]
+async fn test_iocp() {
+    _ = pretty_env_logger::try_init();
+
+    let reactor = IoReactor::default();
+
+    let listen_addr = "127.0.0.1:1812".parse().unwrap();
+
+    let mut acceptor = TcpAcceptor::new(reactor.clone(), listen_addr).unwrap();
+
+    assert_stream_pending!(acceptor);
+
+    let _connect = TcpConnection::connect(reactor.clone(), listen_addr, None);
+}

@@ -3,13 +3,14 @@ use std::{
     io::{Error, Result},
     mem::size_of,
     net::SocketAddr,
+    pin::Pin,
     ptr::null_mut,
     sync::Arc,
-    task::{Poll, Waker},
+    task::{Context, Poll},
 };
 
-use futures::task::noop_waker;
-use once_cell::sync::OnceCell;
+use futures::task::noop_waker_ref;
+
 use os_socketaddr::OsSocketAddr;
 use windows::core::GUID;
 use windows::Win32::Networking::WinSock::*;
@@ -44,7 +45,7 @@ where
     fn drop(&mut self) {
         // Only self
         if Arc::strong_count(&self.fd) == 1 {
-            _ = self.poll_close(noop_waker());
+            _ = Pin::new(self).poll_close(&mut Context::from_waker(noop_waker_ref()));
         }
     }
 }
@@ -143,23 +144,29 @@ where
         }
     }
     pub fn poll_connect(
-        &mut self,
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
         remote: SocketAddr,
-        waker: std::task::Waker,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        // let connectex: LPFN_CONNECTEX = null_mut();
-        // WSAIoctl(
-        //     *self.fd,
-        //     SIO_GET_EXTENSION_FUNCTION_POINTER,
-        //     Some((&WSAID_CONNECTEX)),
-        //     size_of::<GUID>() as u32,
-        //     lpvoutbuffer,
-        //     cboutbuffer,
-        //     lpcbbytesreturned,
-        //     lpoverlapped,
-        //     lpcompletionroutine,
-        // );
+        unsafe {
+            let connectex = Some(null_mut());
+            let mut bytes_returned = 0u32;
+            if WSAIoctl(
+                *self.fd,
+                SIO_GET_EXTENSION_FUNCTION_POINTER,
+                Some((&WSAID_CONNECTEX as *const GUID).cast::<c_void>()),
+                size_of::<GUID>() as u32,
+                connectex,
+                size_of::<*mut c_void>() as u32,
+                &mut bytes_returned as *mut u32,
+                None,
+                None,
+            ) != 0
+            {
+                return Poll::Ready(Err(Error::last_os_error()));
+            }
+        }
 
         unimplemented!()
     }
@@ -172,23 +179,27 @@ where
     type ReadBuffer<'cx> = SocketReadBuffer<'cx, P>;
     type WriteBuffer<'cx> = SocketWriteBuffer<'cx>;
 
-    fn poll_close(&mut self, _waker: Waker) -> Poll<Result<()>> {
+    fn poll_close(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<()>> {
         unimplemented!()
     }
 
     fn poll_read<'cx>(
-        &mut self,
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
         buffer: Self::ReadBuffer<'cx>,
-        waker: std::task::Waker,
+
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<usize>> {
         unimplemented!()
     }
 
     fn poll_write<'cx>(
-        &mut self,
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
         buffer: Self::WriteBuffer<'cx>,
-        waker: std::task::Waker,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<usize>> {
         unimplemented!()

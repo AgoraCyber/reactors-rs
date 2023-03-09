@@ -1,11 +1,12 @@
 use std::{
     io::{Result, SeekFrom},
     path::PathBuf,
+    pin::Pin,
     sync::Arc,
-    task::{Poll, Waker},
+    task::{Context, Poll, Waker},
 };
 
-use futures::task::noop_waker;
+use futures::task::noop_waker_ref;
 use windows::Win32::Foundation::*;
 
 use crate::{
@@ -29,7 +30,7 @@ where
     fn drop(&mut self) {
         // Only self
         if Arc::strong_count(&self.fd) == 1 {
-            _ = self.poll_close(noop_waker());
+            _ = Pin::new(self).poll_close(&mut Context::from_waker(noop_waker_ref()));
         }
     }
 }
@@ -67,23 +68,27 @@ where
 
     type WriteBuffer<'cx> = &'cx [u8];
 
-    fn poll_close(&mut self, _waker: Waker) -> Poll<Result<()>> {
+    fn poll_close(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<()>> {
         unimplemented!()
     }
 
     fn poll_read<'cx>(
-        &mut self,
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
         buffer: Self::ReadBuffer<'cx>,
-        waker: std::task::Waker,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<usize>> {
         unimplemented!()
     }
 
     fn poll_write<'cx>(
-        &mut self,
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
         buffer: Self::WriteBuffer<'cx>,
-        waker: std::task::Waker,
+
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<usize>> {
         unimplemented!()

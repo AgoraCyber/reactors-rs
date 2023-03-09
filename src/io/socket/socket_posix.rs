@@ -131,9 +131,9 @@ where
         }
     }
     pub fn poll_connect(
-        &mut self,
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
         remote: SocketAddr,
-        waker: std::task::Waker,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<()>> {
         use libc::*;

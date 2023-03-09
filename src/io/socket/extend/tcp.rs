@@ -104,7 +104,7 @@ where
         let mut handle = self.handle.take().unwrap();
 
         let poll_connect =
-            handle.poll_connect(self.remote, cx.waker().clone(), self.timeout.clone());
+            Pin::new(&mut handle).poll_connect(cx, self.remote, self.timeout.clone());
 
         match poll_connect {
             Poll::Pending => {
