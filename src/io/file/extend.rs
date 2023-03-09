@@ -1,4 +1,4 @@
-use std::{io::Result, task::Poll, time::Duration};
+use std::{io::Result, pin::Pin, task::Poll, time::Duration};
 
 use futures::{AsyncRead, AsyncSeek, AsyncWrite};
 use std::path::PathBuf;
@@ -53,7 +53,7 @@ where
     ) -> std::task::Poll<std::io::Result<usize>> {
         let timeout = self.1.clone();
 
-        self.0.poll_read(buf, cx.waker().clone(), timeout)
+        Pin::new(&mut self.0).poll_read(cx, buf, timeout)
     }
 }
 
@@ -83,7 +83,7 @@ where
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        self.0.poll_close(cx.waker().clone())
+        Pin::new(&mut self.0).poll_close(cx)
     }
 
     fn poll_flush(
@@ -100,7 +100,7 @@ where
     ) -> std::task::Poll<std::io::Result<usize>> {
         let timeout = self.1.clone();
 
-        self.0.poll_write(buf, cx.waker().clone(), timeout)
+        Pin::new(&mut self.0).poll_write(cx, buf, timeout)
     }
 }
 

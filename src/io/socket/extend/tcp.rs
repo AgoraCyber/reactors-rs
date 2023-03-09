@@ -1,4 +1,5 @@
 use std::io::Error;
+use std::pin::Pin;
 use std::{io::Result, net::SocketAddr, task::Poll, time::Duration};
 
 use futures::{AsyncRead, AsyncWrite, Future, Stream};
@@ -140,8 +141,7 @@ where
     ) -> Poll<Result<usize>> {
         let timeout = self.timeout.clone();
 
-        self.handle
-            .poll_read(SocketReadBuffer::Stream(buf), cx.waker().clone(), timeout)
+        Pin::new(&mut self.handle).poll_read(cx, SocketReadBuffer::Stream(buf), timeout)
     }
 }
 
@@ -162,7 +162,7 @@ where
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<()>> {
-        self.handle.poll_close(cx.waker().clone())
+        Pin::new(&mut self.handle).poll_close(cx)
     }
 
     fn poll_flush(
@@ -179,8 +179,7 @@ where
     ) -> Poll<Result<usize>> {
         let timeout = self.timeout.clone();
 
-        self.handle
-            .poll_write(SocketWriteBuffer::Stream(buf), cx.waker().clone(), timeout)
+        Pin::new(&mut self.handle).poll_write(cx, SocketWriteBuffer::Stream(buf), timeout)
     }
 }
 
@@ -215,9 +214,9 @@ where
         let mut handle = None;
         let mut remote = None;
 
-        let poll = self.0.poll_read(
+        let poll = Pin::new(&mut self.0).poll_read(
+            cx,
             SocketReadBuffer::Accept(&mut handle, &mut remote),
-            cx.waker().clone(),
             None,
         );
 

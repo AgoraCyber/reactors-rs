@@ -2,13 +2,14 @@ use std::{
     ffi::CString,
     io::{Error, Result, SeekFrom},
     path::PathBuf,
+    pin::Pin,
     ptr::null_mut,
     sync::Arc,
-    task::{Poll, Waker},
+    task::{Context, Poll, Waker},
 };
 
 use errno::set_errno;
-use futures::task::noop_waker;
+use futures::task::noop_waker_ref;
 
 use crate::{
     io::poller::{PollerReactor, SysPoller},
@@ -32,7 +33,7 @@ where
     fn drop(&mut self) {
         // Only self
         if Arc::strong_count(&self.fd) == 1 {
-            _ = self.poll_close(noop_waker());
+            _ = Pin::new(self).poll_close(&mut Context::from_waker(noop_waker_ref()));
         }
     }
 }
@@ -98,7 +99,10 @@ where
 
     type WriteBuffer<'cx> = &'cx [u8];
 
-    fn poll_close(&mut self, _waker: Waker) -> Poll<Result<()>> {
+    fn poll_close(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<()>> {
         log::trace!("close file({})", *self.fd);
 
         if unsafe { libc::fclose(self.file) } < 0 {
@@ -109,9 +113,9 @@ where
     }
 
     fn poll_read<'cx>(
-        &mut self,
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
         buffer: Self::ReadBuffer<'cx>,
-        waker: std::task::Waker,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<usize>> {
         use libc::*;
@@ -124,10 +128,12 @@ where
                 set_errno(e);
 
                 if e.0 == EAGAIN || e.0 == EWOULDBLOCK {
-                    return match self
-                        .poller
-                        .watch_readable_event_once(*self.fd, waker, timeout)
-                    {
+                    let fd = *self.fd;
+                    return match self.poller.watch_readable_event_once(
+                        fd,
+                        cx.waker().clone(),
+                        timeout,
+                    ) {
                         Ok(_) => Poll::Pending,
                         Err(err) => Poll::Ready(Err(err)),
                     };
@@ -141,9 +147,9 @@ where
     }
 
     fn poll_write<'cx>(
-        &mut self,
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
         buffer: Self::WriteBuffer<'cx>,
-        waker: std::task::Waker,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<usize>> {
         use libc::*;
@@ -156,10 +162,12 @@ where
                 set_errno(e);
 
                 if e.0 == EAGAIN || e.0 == EWOULDBLOCK {
-                    return match self
-                        .poller
-                        .watch_writable_event_once(*self.fd, waker, timeout)
-                    {
+                    let fd = *self.fd;
+                    return match self.poller.watch_writable_event_once(
+                        fd,
+                        cx.waker().clone(),
+                        timeout,
+                    ) {
                         Ok(_) => Poll::Pending,
                         Err(err) => Poll::Ready(Err(err)),
                     };

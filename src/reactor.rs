@@ -39,9 +39,10 @@ pub trait ReactorHandle: Sized {
     /// - `waker` Writing task [`waking`](Waker) up handle.
     /// - `timeout` Timeout interval for write operations
     fn poll_write<'cx>(
-        &mut self,
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
         buffer: Self::WriteBuffer<'cx>,
-        waker: Waker,
+
         timeout: Option<Duration>,
     ) -> Poll<Result<usize>>;
 
@@ -53,12 +54,15 @@ pub trait ReactorHandle: Sized {
     /// - `waker` Reading task [`waking`](Waker) up handle.
     /// - `timeout` Timeout interval for write operations
     fn poll_read<'cx>(
-        &mut self,
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
         buffer: Self::ReadBuffer<'cx>,
-        waker: Waker,
         timeout: Option<Duration>,
     ) -> Poll<Result<usize>>;
 
     ///
-    fn poll_close(&mut self, waker: Waker) -> Poll<Result<()>>;
+    fn poll_close(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<()>>;
 }

@@ -1,3 +1,4 @@
+use std::pin::Pin;
 use std::{io::Result, net::SocketAddr, task::Poll, time::Duration};
 
 use futures::{Sink, Stream};
@@ -80,9 +81,9 @@ where
 
         let timeout = self.timeout.clone();
 
-        let read = self.handle.poll_read(
+        let read = Pin::new(&mut self.handle).poll_read(
+            cx,
             SocketReadBuffer::Datagram(&mut buff, &mut remote),
-            cx.waker().clone(),
             timeout,
         );
 
@@ -141,9 +142,9 @@ where
         let timeout = self.timeout.clone();
 
         if let Some((buff, remote)) = send_buff {
-            let write = self.handle.poll_write(
+            let write = Pin::new(&mut self.handle).poll_write(
+                cx,
                 SocketWriteBuffer::Datagram(&buff, &remote),
-                cx.waker().clone(),
                 timeout,
             );
 
@@ -165,6 +166,6 @@ where
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<std::result::Result<(), Self::Error>> {
-        self.handle.poll_close(cx.waker().clone())
+        Pin::new(&mut self.handle).poll_close(cx)
     }
 }
