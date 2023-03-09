@@ -1,22 +1,23 @@
 use std::{
     ffi::c_void,
     io::{Error, Result},
-    mem::size_of,
+    mem::{size_of, transmute},
     net::SocketAddr,
     pin::Pin,
-    ptr::null_mut,
+    ptr::{null, null_mut},
     sync::Arc,
     task::{Context, Poll},
 };
 
 use futures::task::noop_waker_ref;
 
+use once_cell::sync::OnceCell;
 use os_socketaddr::OsSocketAddr;
 use windows::core::GUID;
 use windows::Win32::Networking::WinSock::*;
 
 use crate::{
-    io::poller::{PollerReactor, SysPoller},
+    io::poller::{sys::PollerOVERLAPPED, PollRequest, PollerReactor, SysPoller},
     ReactorHandle,
 };
 
@@ -28,6 +29,13 @@ static WSAID_CONNECTEX: GUID = GUID::from_values(
     0x4660,
     [0x8e, 0xe9, 0x76, 0xe5, 0x8c, 0x74, 0x06, 0x3e],
 );
+
+// static WSAID_DISCONNECTEX: GUID = GUID::from_values(
+//     0x7fda2e11,
+//     0x8630,
+//     0x436f,
+//     [0xa0, 0x31, 0xf5, 0x36, 0xa6, 0xee, 0xc1, 0x57],
+// );
 
 #[derive(Clone, Debug)]
 pub struct SocketHandle<P>
@@ -144,31 +152,70 @@ where
         }
     }
     pub fn poll_connect(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         remote: SocketAddr,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<()>> {
+        let connectex = self.get_connect_ex()?.unwrap();
+
+        let addr = OsSocketAddr::from(remote);
+
+        let overlapped = PollerOVERLAPPED::new(PollRequest::Writable(self.fd.0 as isize));
+
+        let fd = *self.fd;
+
         unsafe {
-            let connectex = Some(null_mut());
+            let overlapped = overlapped.into();
+            if connectex(
+                fd,
+                addr.as_ptr() as *const SOCKADDR,
+                addr.len(),
+                null_mut(),
+                0,
+                null_mut(),
+                overlapped,
+            )
+            .as_bool()
+            {
+                // release unused buff.
+                _ = Box::<PollerOVERLAPPED>::from(overlapped);
+
+                return Err(Error::last_os_error())?;
+            }
+        }
+
+        // self.poller
+        //     .watch_readable_event_once(fd.0 as isize, cx.waker().clone(), timeout)?;
+
+        Poll::Pending
+    }
+
+    fn get_connect_ex(&self) -> Result<&'static LPFN_CONNECTEX> {
+        static CONNECT_EX: OnceCell<LPFN_CONNECTEX> = OnceCell::new();
+
+        let fd = *self.fd;
+
+        CONNECT_EX.get_or_try_init(|| unsafe {
+            let connectex: *const c_void = null();
             let mut bytes_returned = 0u32;
             if WSAIoctl(
-                *self.fd,
+                fd,
                 SIO_GET_EXTENSION_FUNCTION_POINTER,
                 Some((&WSAID_CONNECTEX as *const GUID).cast::<c_void>()),
                 size_of::<GUID>() as u32,
-                connectex,
+                Some(transmute(&connectex)),
                 size_of::<*mut c_void>() as u32,
                 &mut bytes_returned as *mut u32,
                 None,
                 None,
-            ) != 0
+            ) == SOCKET_ERROR
             {
-                return Poll::Ready(Err(Error::last_os_error()));
+                return Err(Error::last_os_error());
             }
-        }
 
-        unimplemented!()
+            Ok(transmute(connectex))
+        })
     }
 }
 
@@ -180,10 +227,16 @@ where
     type WriteBuffer<'cx> = SocketWriteBuffer<'cx>;
 
     fn poll_close(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<()>> {
-        unimplemented!()
+        unsafe {
+            if closesocket(*self.fd) == SOCKET_ERROR {
+                return Poll::Ready(Err(Error::last_os_error()));
+            } else {
+                return Poll::Ready(Ok(()));
+            }
+        }
     }
 
     fn poll_read<'cx>(
@@ -193,6 +246,24 @@ where
 
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<usize>> {
+        match buffer {
+            SocketReadBuffer::Accept(handle, remote) => unsafe {
+                if handle.is_none() {}
+                // AcceptEx(
+                //     slistensocket,
+                //     sacceptsocket,
+                //     lpoutputbuffer,
+                //     dwreceivedatalength,
+                //     dwlocaladdresslength,
+                //     dwremoteaddresslength,
+                //     lpdwbytesreceived,
+                //     lpoverlapped,
+                // )
+            },
+            SocketReadBuffer::Datagram(buff, remote) => {}
+            SocketReadBuffer::Stream(buff) => {}
+        }
+
         unimplemented!()
     }
 

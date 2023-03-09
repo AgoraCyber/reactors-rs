@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::io::Error;
 use std::pin::Pin;
 use std::{io::Result, net::SocketAddr, task::Poll, time::Duration};
@@ -27,7 +28,7 @@ where
 
 impl<P> TcpConnection<P>
 where
-    P: SysPoller + Unpin + Clone + 'static,
+    P: SysPoller + Unpin + Clone + 'static + Debug,
 {
     pub fn connect(
         poller: PollerReactor<P>,
@@ -77,9 +78,10 @@ where
 }
 
 /// Tcp connect future.
+#[derive(Debug)]
 pub struct TcpConnect<P>
 where
-    P: SysPoller + Unpin + Clone + 'static,
+    P: SysPoller + Unpin + Clone + 'static + Debug,
 {
     error: Option<Error>,
     handle: Option<SocketHandle<P>>,
@@ -89,7 +91,7 @@ where
 
 impl<P> Future for TcpConnect<P>
 where
-    P: SysPoller + Unpin + Clone + 'static,
+    P: SysPoller + Unpin + Clone + 'static + Debug,
 {
     type Output = Result<TcpConnection<P>>;
 

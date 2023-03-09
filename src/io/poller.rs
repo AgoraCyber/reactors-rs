@@ -130,6 +130,10 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
             last_poll_time: SystemTime::now(),
         }
     }
+}
+
+#[cfg(target_family = "unix")]
+impl<P: SysPoller + Clone> PollerReactor<P> {
     /// Register a once time watcher of readable event for [`fd`](RawFd)
     pub fn watch_readable_event_once(
         &mut self,
@@ -202,8 +206,10 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
 
         self.sys_poller.poll_once(&opcodes, timeout)
     }
+}
 
-    #[cfg(target_family = "windows")]
+#[cfg(target_family = "windows")]
+impl<P: SysPoller + Clone> PollerReactor<P> {
     fn do_poll_once(&mut self, timeout: Duration) -> Result<Vec<PollResponse>> {
         self.sys_poller.poll_once(timeout)
     }

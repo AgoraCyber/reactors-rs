@@ -1,5 +1,6 @@
 use std::{
     io::{Error, Result},
+    mem::zeroed,
     ptr::null_mut,
     sync::Once,
     time::{Duration, SystemTime},
@@ -20,8 +21,23 @@ pub struct PollerOVERLAPPED {
 }
 
 impl PollerOVERLAPPED {
-    pub fn new() -> Self {
-        unsafe { ::core::mem::zeroed() }
+    pub fn new(request: PollRequest) -> Self {
+        Self {
+            request,
+            overlapped: unsafe { zeroed() },
+        }
+    }
+}
+
+impl Into<*mut OVERLAPPED> for PollerOVERLAPPED {
+    fn into(self) -> *mut OVERLAPPED {
+        Box::into_raw(Box::new(self)) as *mut OVERLAPPED
+    }
+}
+
+impl From<*mut OVERLAPPED> for Box<PollerOVERLAPPED> {
+    fn from(value: *mut OVERLAPPED) -> Self {
+        unsafe { Box::from_raw(value as *mut PollerOVERLAPPED) }
     }
 }
 
