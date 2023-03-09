@@ -157,13 +157,18 @@ where
         remote: SocketAddr,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<()>> {
+        let fd = *self.fd;
+
+        if let Some(overlapped) =
+            self.poller
+                .watch_writable_event_once(fd.0 as isize, cx.waker().clone(), timeout)?
+        {}
+
         let connectex = self.get_connect_ex()?.unwrap();
 
         let addr = OsSocketAddr::from(remote);
 
         let overlapped = PollerOVERLAPPED::new(PollRequest::Writable(self.fd.0 as isize));
-
-        let fd = *self.fd;
 
         unsafe {
             let overlapped = overlapped.into();

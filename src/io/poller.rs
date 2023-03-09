@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    fmt::Display,
+    fmt::{Debug, Display},
     io::{Error, ErrorKind, Result},
     sync::{Arc, Mutex},
     task::{Poll, Waker},
@@ -11,7 +11,19 @@ use std::{
 
 use crate::{timewheel::TimeWheel, Reactor};
 
+use self::sys::PollerOVERLAPPED;
+
 pub mod sys;
+
+#[cfg(target_family = "unix")]
+pub type PollContext = ();
+#[cfg(target_family = "unix")]
+pub type PollResult = Result<PollContext>;
+
+#[cfg(target_family = "windows")]
+pub type PollContext = Box<PollerOVERLAPPED>;
+#[cfg(target_family = "windows")]
+pub type PollResult = Result<PollContext>;
 
 /// Poll opcode.
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
@@ -23,7 +35,7 @@ pub enum PollRequest {
 }
 
 impl PollRequest {
-    pub fn into_response(self, result: Result<()>) -> PollResponse {
+    pub fn into_response(self, result: PollResult) -> PollResponse {
         match self {
             Self::Readable(fd) => PollResponse::ReadableReady(fd, result),
             Self::Writable(fd) => PollResponse::WritableReady(fd, result),
@@ -49,9 +61,9 @@ impl Display for PollRequest {
 #[derive(Debug)]
 pub enum PollResponse {
     /// Poll event to notify readable event
-    ReadableReady(sys::RawFd, Result<()>),
+    ReadableReady(sys::RawFd, PollResult),
     /// Poll event to notify writable event
-    WritableReady(sys::RawFd, Result<()>),
+    WritableReady(sys::RawFd, PollResult),
 }
 
 impl Display for PollResponse {
@@ -69,21 +81,17 @@ impl Display for PollResponse {
 
 /// System io multiplexer trait.
 pub trait SysPoller {
-    #[cfg(target_family = "unix")]
     fn poll_once(
         &mut self,
         opcodes: &[PollRequest],
         timeout: Duration,
     ) -> Result<Vec<PollResponse>>;
-
-    #[cfg(target_family = "windows")]
-    fn poll_once(&mut self, timeout: Duration) -> Result<Vec<PollResponse>>;
 }
 
 #[derive(Debug)]
 struct EventWakers {
     reqs: HashMap<PollRequest, Waker>,
-    resps: HashMap<PollRequest, Result<()>>,
+    resps: HashMap<PollRequest, PollResult>,
     time_wheel: TimeWheel<PollRequest>,
 }
 
@@ -130,23 +138,20 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
             last_poll_time: SystemTime::now(),
         }
     }
-}
 
-#[cfg(target_family = "unix")]
-impl<P: SysPoller + Clone> PollerReactor<P> {
     /// Register a once time watcher of readable event for [`fd`](RawFd)
     pub fn watch_readable_event_once(
         &mut self,
         fd: sys::RawFd,
         waker: Waker,
         timeout: Option<Duration>,
-    ) -> Result<()> {
+    ) -> Result<Option<PollContext>> {
         let mut wakers = self.wakers.lock().unwrap();
 
         let request = PollRequest::Readable(fd);
 
         if let Some(result) = wakers.resps.remove(&request) {
-            return result;
+            return result.map(|c| Some(c));
         }
 
         wakers.reqs.insert(request, waker);
@@ -157,7 +162,7 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
             wakers.time_wheel.add(timeout, request);
         }
 
-        Ok(())
+        Ok(None)
     }
 
     /// Register a once time watcher of writable event for [`fd`](RawFd)
@@ -166,13 +171,13 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
         fd: sys::RawFd,
         waker: Waker,
         timeout: Option<Duration>,
-    ) -> Result<()> {
+    ) -> Result<Option<PollContext>> {
         let mut wakers = self.wakers.lock().unwrap();
 
         let request = PollRequest::Writable(fd);
 
         if let Some(result) = wakers.resps.remove(&request) {
-            return result;
+            return result.map(|c| Some(c));
         }
 
         wakers.reqs.insert(request, waker);
@@ -187,10 +192,12 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
             wakers.time_wheel.add(timeout, request);
         }
 
-        Ok(())
+        Ok(None)
     }
+}
 
-    #[cfg(target_family = "unix")]
+#[cfg(target_family = "unix")]
+impl<P: SysPoller + Clone> PollerReactor<P> {
     fn do_poll_once(&mut self, timeout: Duration) -> Result<Vec<PollResponse>> {
         let opcodes = {
             let wakers = self.wakers.lock().unwrap();
@@ -211,7 +218,7 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
 #[cfg(target_family = "windows")]
 impl<P: SysPoller + Clone> PollerReactor<P> {
     fn do_poll_once(&mut self, timeout: Duration) -> Result<Vec<PollResponse>> {
-        self.sys_poller.poll_once(timeout)
+        self.sys_poller.poll_once(&[], timeout)
     }
 }
 

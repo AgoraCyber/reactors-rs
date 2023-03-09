@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     io::{Error, Result},
     mem::zeroed,
     ptr::null_mut,
@@ -15,9 +16,16 @@ use windows::Win32::{
 use crate::io::poller::{PollRequest, PollResponse};
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct PollerOVERLAPPED {
     overlapped: OVERLAPPED,
     request: PollRequest,
+}
+
+impl Debug for PollerOVERLAPPED {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.request)
+    }
 }
 
 impl PollerOVERLAPPED {
@@ -77,7 +85,7 @@ impl SysPoller {
 }
 
 impl crate::io::poller::SysPoller for SysPoller {
-    fn poll_once(&mut self, timeout: Duration) -> Result<Vec<PollResponse>> {
+    fn poll_once(&mut self, _: &[PollRequest], timeout: Duration) -> Result<Vec<PollResponse>> {
         let start_time = SystemTime::now();
 
         let mut resps = vec![];
@@ -121,7 +129,7 @@ impl crate::io::poller::SysPoller for SysPoller {
                 } else {
                     let overlapped = Box::from_raw(overlapped);
 
-                    resps.push(overlapped.request.into_response(Ok(())));
+                    resps.push(overlapped.request.into_response(Ok(overlapped)));
                 }
             }
 
