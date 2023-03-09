@@ -13,27 +13,43 @@ use windows::Win32::{
     System::IO::{CreateIoCompletionPort, GetQueuedCompletionStatus, OVERLAPPED},
 };
 
-use crate::io::poller::{PollRequest, PollResponse};
+use crate::io::poller::{PollContext, PollRequest, PollResponse};
 
 #[repr(C)]
 #[derive(Clone)]
 pub struct PollerOVERLAPPED {
     overlapped: OVERLAPPED,
-    request: PollRequest,
+    pub(crate) request: PollRequest,
+    pub(crate) context: PollContext,
+}
+
+impl PollerOVERLAPPED {
+    /// Create new overlapped data.
+    pub fn new(request: PollRequest, context: PollContext) -> Self {
+        Self {
+            overlapped: unsafe { zeroed() },
+            context,
+            request,
+        }
+    }
+
+    pub fn into_response(self, error: Option<Error>) -> PollResponse {
+        let result = if let Some(err) = error {
+            Err(err)
+        } else {
+            Ok(self.context)
+        };
+
+        match self.request {
+            PollRequest::Readable(fd) => PollResponse::ReadableReady(fd, result),
+            PollRequest::Writable(fd) => PollResponse::WritableReady(fd, result),
+        }
+    }
 }
 
 impl Debug for PollerOVERLAPPED {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.request)
-    }
-}
-
-impl PollerOVERLAPPED {
-    pub fn new(request: PollRequest) -> Self {
-        Self {
-            request,
-            overlapped: unsafe { zeroed() },
-        }
+        write!(f, "{:?}", self.context)
     }
 }
 
@@ -85,6 +101,9 @@ impl SysPoller {
 }
 
 impl crate::io::poller::SysPoller for SysPoller {
+    fn iocp_handle(&self) -> windows::Win32::Foundation::HANDLE {
+        self.iocp
+    }
     fn poll_once(&mut self, _: &[PollRequest], timeout: Duration) -> Result<Vec<PollResponse>> {
         let start_time = SystemTime::now();
 
@@ -121,15 +140,11 @@ impl crate::io::poller::SysPoller for SysPoller {
 
                     let overlapped = Box::from_raw(overlapped);
 
-                    resps.push(
-                        overlapped
-                            .request
-                            .into_response(Err(Error::last_os_error())),
-                    );
+                    resps.push(overlapped.into_response(Some(Error::last_os_error())));
                 } else {
                     let overlapped = Box::from_raw(overlapped);
 
-                    resps.push(overlapped.request.into_response(Ok(overlapped)));
+                    resps.push(overlapped.into_response(None));
                 }
             }
 

@@ -11,8 +11,6 @@ use std::{
 
 use crate::{timewheel::TimeWheel, Reactor};
 
-use self::sys::PollerOVERLAPPED;
-
 pub mod sys;
 
 #[cfg(target_family = "unix")]
@@ -21,7 +19,15 @@ pub type PollContext = ();
 pub type PollResult = Result<PollContext>;
 
 #[cfg(target_family = "windows")]
-pub type PollContext = Box<PollerOVERLAPPED>;
+#[derive(Debug, Clone)]
+pub enum PollContext {
+    Accept(sys::RawFd, Box<[u8; 32]>),
+    Connect,
+    Read(usize),
+    RecvFrom(usize, Box<[u8; 16]>),
+    SendTo(usize),
+    Write(usize),
+}
 #[cfg(target_family = "windows")]
 pub type PollResult = Result<PollContext>;
 
@@ -32,15 +38,6 @@ pub enum PollRequest {
     Readable(sys::RawFd),
     /// Poll event to register writable event
     Writable(sys::RawFd),
-}
-
-impl PollRequest {
-    pub fn into_response(self, result: PollResult) -> PollResponse {
-        match self {
-            Self::Readable(fd) => PollResponse::ReadableReady(fd, result),
-            Self::Writable(fd) => PollResponse::WritableReady(fd, result),
-        }
-    }
 }
 
 impl Display for PollRequest {
@@ -86,6 +83,9 @@ pub trait SysPoller {
         opcodes: &[PollRequest],
         timeout: Duration,
     ) -> Result<Vec<PollResponse>>;
+
+    #[cfg(target_family = "windows")]
+    fn iocp_handle(&self) -> windows::Win32::Foundation::HANDLE;
 }
 
 #[derive(Debug)]
@@ -139,20 +139,26 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
         }
     }
 
-    /// Register a once time watcher of readable event for [`fd`](RawFd)
-    pub fn watch_readable_event_once(
-        &mut self,
-        fd: sys::RawFd,
-        waker: Waker,
-        timeout: Option<Duration>,
-    ) -> Result<Option<PollContext>> {
-        let mut wakers = self.wakers.lock().unwrap();
+    #[cfg(target_family = "windows")]
+    pub fn iocp_handle(&self) -> windows::Win32::Foundation::HANDLE {
+        self.sys_poller.iocp_handle()
+    }
 
+    pub fn poll_event(&mut self, fd: sys::RawFd) -> Result<Option<PollContext>> {
         let request = PollRequest::Readable(fd);
+
+        let mut wakers = self.wakers.lock().unwrap();
 
         if let Some(result) = wakers.resps.remove(&request) {
             return result.map(|c| Some(c));
         }
+
+        Ok(None)
+    }
+
+    /// Register a once time watcher of readable event for [`fd`](RawFd)
+    pub fn on_event(&mut self, request: PollRequest, waker: Waker, timeout: Option<Duration>) {
+        let mut wakers = self.wakers.lock().unwrap();
 
         wakers.reqs.insert(request, waker);
 
@@ -161,38 +167,6 @@ impl<P: SysPoller + Clone> PollerReactor<P> {
 
             wakers.time_wheel.add(timeout, request);
         }
-
-        Ok(None)
-    }
-
-    /// Register a once time watcher of writable event for [`fd`](RawFd)
-    pub fn watch_writable_event_once(
-        &mut self,
-        fd: sys::RawFd,
-        waker: Waker,
-        timeout: Option<Duration>,
-    ) -> Result<Option<PollContext>> {
-        let mut wakers = self.wakers.lock().unwrap();
-
-        let request = PollRequest::Writable(fd);
-
-        if let Some(result) = wakers.resps.remove(&request) {
-            return result.map(|c| Some(c));
-        }
-
-        wakers.reqs.insert(request, waker);
-
-        if let Some(timeout) = timeout {
-            let mut timeout = (timeout.as_millis() / self.tick_duration.as_millis()) as u64;
-
-            if timeout == 0 {
-                timeout = 1;
-            }
-
-            wakers.time_wheel.add(timeout, request);
-        }
-
-        Ok(None)
     }
 }
 

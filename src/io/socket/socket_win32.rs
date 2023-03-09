@@ -13,11 +13,13 @@ use futures::task::noop_waker_ref;
 
 use once_cell::sync::OnceCell;
 use os_socketaddr::OsSocketAddr;
-use windows::core::GUID;
+use winapi::shared::winerror::ERROR_IO_PENDING;
+use windows::Win32::Foundation::*;
 use windows::Win32::Networking::WinSock::*;
+use windows::{core::*, Win32::System::IO::CreateIoCompletionPort};
 
 use crate::{
-    io::poller::{sys::PollerOVERLAPPED, PollRequest, PollerReactor, SysPoller},
+    io::poller::{sys::PollerOVERLAPPED, PollContext, PollRequest, PollerReactor, SysPoller},
     ReactorHandle,
 };
 
@@ -44,6 +46,7 @@ where
 {
     poller: PollerReactor<P>,
     fd: Arc<SOCKET>,
+    v4: bool,
 }
 
 impl<P> Drop for SocketHandle<P>
@@ -62,32 +65,59 @@ impl<P> SocketHandle<P>
 where
     P: SysPoller + Unpin + Clone + 'static,
 {
+    fn socket(iocp_handle: HANDLE, r#type: u16, protocol: IPPROTO, v4: bool) -> Result<SOCKET> {
+        let socket = unsafe {
+            match v4 {
+                true => WSASocketW(
+                    AF_INET.0 as i32,
+                    r#type as i32,
+                    protocol.0,
+                    None,
+                    0,
+                    WSA_FLAG_OVERLAPPED,
+                ),
+                false => WSASocketW(
+                    AF_INET6.0 as i32,
+                    r#type as i32,
+                    protocol.0,
+                    None,
+                    0,
+                    WSA_FLAG_OVERLAPPED,
+                ),
+            }
+        };
+
+        if socket == INVALID_SOCKET {
+            return Err(Error::last_os_error());
+        }
+
+        unsafe {
+            // bind socket to completion port.
+            CreateIoCompletionPort(HANDLE(socket.0 as isize), iocp_handle, 0, 0)?;
+        }
+
+        Ok(socket)
+    }
+
     /// Create socket handle from raw socket fd.
-    pub fn new(poller: PollerReactor<P>, fd: SOCKET) -> Self {
+    pub fn new(poller: PollerReactor<P>, fd: SOCKET, v4: bool) -> Self {
         Self {
             poller,
             fd: Arc::new(fd),
+            v4,
         }
     }
     /// Create udp socket with [`addr`](SocketAddr)
     pub fn udp(poller: PollerReactor<P>, addr: SocketAddr) -> Result<Self> {
         unsafe {
-            let fd = match addr {
-                SocketAddr::V4(_) => WSASocketW(
-                    AF_INET.0 as i32,
-                    SOCK_DGRAM as i32,
-                    IPPROTO_UDP.0,
-                    None,
-                    0,
-                    WSA_FLAG_OVERLAPPED,
+            let (fd, v4) = match addr {
+                SocketAddr::V4(_) => (
+                    Self::socket(poller.iocp_handle(), SOCK_DGRAM, IPPROTO_UDP, true)?,
+                    true,
                 ),
-                SocketAddr::V6(_) => WSASocketW(
-                    AF_INET6.0 as i32,
-                    SOCK_DGRAM as i32,
-                    IPPROTO_UDP.0,
-                    None,
-                    0,
-                    WSA_FLAG_OVERLAPPED,
+                SocketAddr::V6(_) => (
+                    Self::socket(poller.iocp_handle(), SOCK_DGRAM, IPPROTO_UDP, false)?,
+                    false,
                 ),
             };
 
@@ -101,29 +131,21 @@ where
                 return Err(Error::last_os_error());
             }
 
-            Ok(Self::new(poller, fd))
+            Ok(Self::new(poller, fd, v4))
         }
     }
 
     /// Create tcp socket
     pub fn tcp(poller: PollerReactor<P>, bind_addr: SocketAddr) -> Result<Self> {
         unsafe {
-            let fd = match bind_addr {
-                SocketAddr::V4(_) => WSASocketW(
-                    AF_INET.0 as i32,
-                    SOCK_STREAM as i32,
-                    IPPROTO_TCP.0,
-                    None,
-                    0,
-                    WSA_FLAG_OVERLAPPED,
+            let (fd, v4) = match bind_addr {
+                SocketAddr::V4(_) => (
+                    Self::socket(poller.iocp_handle(), SOCK_STREAM, IPPROTO_TCP, true)?,
+                    true,
                 ),
-                SocketAddr::V6(_) => WSASocketW(
-                    AF_INET6.0 as i32,
-                    SOCK_STREAM as i32,
-                    IPPROTO_TCP.0,
-                    None,
-                    0,
-                    WSA_FLAG_OVERLAPPED,
+                SocketAddr::V6(_) => (
+                    Self::socket(poller.iocp_handle(), SOCK_STREAM, IPPROTO_TCP, false)?,
+                    false,
                 ),
             };
 
@@ -137,7 +159,7 @@ where
                 return Err(Error::last_os_error());
             }
 
-            Ok(Self::new(poller, fd))
+            Ok(Self::new(poller, fd, v4))
         }
     }
 
@@ -159,20 +181,27 @@ where
     ) -> std::task::Poll<std::io::Result<()>> {
         let fd = *self.fd;
 
-        if let Some(overlapped) =
-            self.poller
-                .watch_writable_event_once(fd.0 as isize, cx.waker().clone(), timeout)?
-        {}
+        if let Some(context) = self.poller.poll_event(fd.0 as isize)? {
+            match context {
+                PollContext::Connect => return Poll::Ready(Ok(())),
+                _ => {
+                    panic!("expect PollContext::Connect, but got {:?}", context);
+                }
+            }
+        }
 
         let connectex = self.get_connect_ex()?.unwrap();
 
         let addr = OsSocketAddr::from(remote);
 
-        let overlapped = PollerOVERLAPPED::new(PollRequest::Writable(self.fd.0 as isize));
+        let overlapped = PollerOVERLAPPED::new(
+            PollRequest::Writable(self.fd.0 as isize),
+            PollContext::Connect,
+        );
 
         unsafe {
             let overlapped = overlapped.into();
-            if connectex(
+            if !connectex(
                 fd,
                 addr.as_ptr() as *const SOCKADDR,
                 addr.len(),
@@ -183,15 +212,25 @@ where
             )
             .as_bool()
             {
-                // release unused buff.
+                if WSAGetLastError().0 as u32 != ERROR_IO_PENDING {
+                    // release unused buff.
+                    _ = Box::<PollerOVERLAPPED>::from(overlapped);
+
+                    return Err(Error::last_os_error())?;
+                }
+            } else {
+                // connected
                 _ = Box::<PollerOVERLAPPED>::from(overlapped);
 
-                return Err(Error::last_os_error())?;
+                return Poll::Ready(Ok(()));
             }
         }
 
-        // self.poller
-        //     .watch_readable_event_once(fd.0 as isize, cx.waker().clone(), timeout)?;
+        self.poller.on_event(
+            PollRequest::Writable(fd.0 as isize),
+            cx.waker().clone(),
+            timeout,
+        );
 
         Poll::Pending
     }
@@ -251,25 +290,233 @@ where
 
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<usize>> {
+        let fd = *self.fd;
+
         match buffer {
             SocketReadBuffer::Accept(handle, remote) => unsafe {
-                if handle.is_none() {}
-                // AcceptEx(
-                //     slistensocket,
-                //     sacceptsocket,
-                //     lpoutputbuffer,
-                //     dwreceivedatalength,
-                //     dwlocaladdresslength,
-                //     dwremoteaddresslength,
-                //     lpdwbytesreceived,
-                //     lpoverlapped,
-                // )
+                if let Some(context) = self.poller.poll_event(fd.0 as isize)? {
+                    match context {
+                        PollContext::Accept(fd, addr) => {
+                            *handle = Some(SocketHandle::new(
+                                self.poller.clone(),
+                                SOCKET(fd as usize),
+                                self.v4,
+                            ));
+
+                            let sock_len = if self.v4 {
+                                size_of::<winapi::shared::ws2def::SOCKADDR_IN>()
+                            } else {
+                                size_of::<winapi::shared::ws2ipdef::SOCKADDR_IN6>()
+                            };
+
+                            let addr = OsSocketAddr::copy_from_raw(
+                                addr[0..16]
+                                    .as_ptr()
+                                    .cast::<winapi::shared::ws2def::SOCKADDR>(),
+                                sock_len as i32,
+                            );
+
+                            *remote = addr.into();
+
+                            return Poll::Ready(Ok(0));
+                        }
+                        _ => {
+                            panic!("expect PollContext::Connect, but got {:?}", context);
+                        }
+                    }
+                }
+                let fd = *self.fd;
+                let accept_socket =
+                    Self::socket(self.poller.iocp_handle(), SOCK_STREAM, IPPROTO_TCP, self.v4)?;
+
+                let buff = Box::into_raw(Box::new([0u8, 32])) as *mut c_void;
+
+                let overlapped = PollerOVERLAPPED::new(
+                    PollRequest::Readable(self.fd.0 as isize),
+                    PollContext::Accept(
+                        accept_socket.0 as isize,
+                        Box::from_raw(buff as *mut [u8; 32]),
+                    ),
+                );
+
+                let overlapped = overlapped.into();
+
+                if !AcceptEx(fd, accept_socket, buff, 0, 16, 16, null_mut(), overlapped).as_bool() {
+                    if WSAGetLastError().0 as u32 != ERROR_IO_PENDING {
+                        _ = Box::<PollerOVERLAPPED>::from(overlapped);
+
+                        return Err(Error::last_os_error())?;
+                    }
+                } else {
+                    *handle = Some(SocketHandle::new(
+                        self.poller.clone(),
+                        accept_socket,
+                        self.v4,
+                    ));
+
+                    let buff = Box::from_raw(buff as *mut [u8; 32]);
+
+                    let sock_len = if self.v4 {
+                        size_of::<winapi::shared::ws2def::SOCKADDR_IN>()
+                    } else {
+                        size_of::<winapi::shared::ws2ipdef::SOCKADDR_IN6>()
+                    };
+
+                    let addr = OsSocketAddr::copy_from_raw(
+                        buff[0..16]
+                            .as_ptr()
+                            .cast::<winapi::shared::ws2def::SOCKADDR>(),
+                        sock_len as i32,
+                    );
+
+                    *remote = addr.into();
+
+                    Box::into_raw(buff);
+
+                    _ = Box::<PollerOVERLAPPED>::from(overlapped);
+
+                    return Poll::Ready(Ok(0));
+                }
             },
-            SocketReadBuffer::Datagram(buff, remote) => {}
-            SocketReadBuffer::Stream(buff) => {}
+            SocketReadBuffer::Datagram(buff, remote) => {
+                if let Some(context) = self.poller.poll_event(fd.0 as isize)? {
+                    match context {
+                        PollContext::RecvFrom(len, addr) => {
+                            let sock_len = if self.v4 {
+                                size_of::<winapi::shared::ws2def::SOCKADDR_IN>()
+                            } else {
+                                size_of::<winapi::shared::ws2ipdef::SOCKADDR_IN6>()
+                            };
+
+                            unsafe {
+                                let addr = OsSocketAddr::copy_from_raw(
+                                    addr.as_ptr().cast::<winapi::shared::ws2def::SOCKADDR>(),
+                                    sock_len as i32,
+                                );
+
+                                *remote = addr.into();
+                            }
+
+                            return Poll::Ready(Ok(len));
+                        }
+                        _ => {
+                            panic!("expect PollContext::Connect, but got {:?}", context);
+                        }
+                    }
+                }
+
+                let buffers = [WSABUF {
+                    buf: PSTR(buff.as_ptr() as *mut u8),
+                    len: buff.len() as u32,
+                }];
+
+                let mut recv_bytes = 0u32;
+
+                let addr_buff = Box::into_raw(Box::new([0u8, 16])) as *mut SOCKADDR;
+
+                let mut addr_buff_len = 0i32;
+
+                let overlapped = PollerOVERLAPPED::new(
+                    PollRequest::Readable(fd.0 as isize),
+                    PollContext::RecvFrom(0, unsafe { Box::from_raw(addr_buff as *mut [u8; 16]) }),
+                );
+
+                let overlapped = Some(overlapped.into());
+
+                unsafe {
+                    if WSARecvFrom(
+                        fd,
+                        &buffers,
+                        Some(&mut recv_bytes as *mut u32),
+                        null_mut(),
+                        Some(addr_buff),
+                        Some(&mut addr_buff_len as *mut i32),
+                        overlapped,
+                        None,
+                    ) != 0
+                    {
+                        if WSAGetLastError().0 as u32 != ERROR_IO_PENDING {
+                            _ = Box::<PollerOVERLAPPED>::from(overlapped.unwrap());
+
+                            return Err(Error::last_os_error())?;
+                        }
+                    } else {
+                        let buff = Box::from_raw(addr_buff as *mut [u8; 32]);
+
+                        let addr = OsSocketAddr::copy_from_raw(
+                            buff[0..addr_buff_len as usize]
+                                .as_ptr()
+                                .cast::<winapi::shared::ws2def::SOCKADDR>(),
+                            addr_buff_len,
+                        );
+
+                        *remote = addr.into();
+
+                        Box::into_raw(buff);
+
+                        _ = Box::<PollerOVERLAPPED>::from(overlapped.unwrap());
+
+                        return Poll::Ready(Ok(recv_bytes as usize));
+                    }
+                }
+            }
+            SocketReadBuffer::Stream(buff) => {
+                if let Some(context) = self.poller.poll_event(fd.0 as isize)? {
+                    match context {
+                        PollContext::Read(len) => {
+                            return Poll::Ready(Ok(len));
+                        }
+                        _ => {
+                            panic!("expect PollContext::Connect, but got {:?}", context);
+                        }
+                    }
+                }
+
+                let buffers = [WSABUF {
+                    buf: PSTR(buff.as_ptr() as *mut u8),
+                    len: buff.len() as u32,
+                }];
+
+                let mut recv_bytes = 0u32;
+
+                let overlapped = PollerOVERLAPPED::new(
+                    PollRequest::Readable(fd.0 as isize),
+                    PollContext::Read(0),
+                );
+
+                let overlapped = Some(overlapped.into());
+
+                unsafe {
+                    if WSARecv(
+                        fd,
+                        &buffers,
+                        Some(&mut recv_bytes as *mut u32),
+                        null_mut(),
+                        overlapped,
+                        None,
+                    ) != 0
+                    {
+                        if WSAGetLastError().0 as u32 != ERROR_IO_PENDING {
+                            _ = Box::<PollerOVERLAPPED>::from(overlapped.unwrap());
+
+                            return Err(Error::last_os_error())?;
+                        }
+                    } else {
+                        _ = Box::<PollerOVERLAPPED>::from(overlapped.unwrap());
+
+                        return Poll::Ready(Ok(recv_bytes as usize));
+                    }
+                }
+            }
         }
 
-        unimplemented!()
+        self.poller.on_event(
+            PollRequest::Readable(fd.0 as isize),
+            cx.waker().clone(),
+            timeout,
+        );
+
+        Poll::Pending
     }
 
     fn poll_write<'cx>(
@@ -278,6 +525,117 @@ where
         buffer: Self::WriteBuffer<'cx>,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<std::io::Result<usize>> {
-        unimplemented!()
+        let fd = *self.fd;
+
+        match buffer {
+            SocketWriteBuffer::Datagram(buff, remote) => {
+                if let Some(context) = self.poller.poll_event(fd.0 as isize)? {
+                    match context {
+                        PollContext::SendTo(len) => {
+                            return Poll::Ready(Ok(len));
+                        }
+                        _ => {
+                            panic!("expect PollContext::Connect, but got {:?}", context);
+                        }
+                    }
+                }
+
+                let buffers = [WSABUF {
+                    buf: PSTR(buff.as_ptr() as *mut u8),
+                    len: buff.len() as u32,
+                }];
+
+                let mut send_bytes = 0u32;
+
+                let remote = OsSocketAddr::from(remote.clone());
+
+                let overlapped = PollerOVERLAPPED::new(
+                    PollRequest::Writable(fd.0 as isize),
+                    PollContext::SendTo(0),
+                );
+
+                let overlapped = Some(overlapped.into());
+
+                unsafe {
+                    if WSASendTo(
+                        fd,
+                        &buffers,
+                        Some(&mut send_bytes as *mut u32),
+                        0,
+                        Some(remote.as_ptr() as *const SOCKADDR),
+                        remote.len(),
+                        overlapped,
+                        None,
+                    ) != 0
+                    {
+                        if WSAGetLastError().0 as u32 != ERROR_IO_PENDING {
+                            _ = Box::<PollerOVERLAPPED>::from(overlapped.unwrap());
+
+                            return Err(Error::last_os_error())?;
+                        }
+                    } else {
+                        _ = Box::<PollerOVERLAPPED>::from(overlapped.unwrap());
+
+                        return Poll::Ready(Ok(send_bytes as usize));
+                    }
+                }
+            }
+            SocketWriteBuffer::Stream(buff) => {
+                if let Some(context) = self.poller.poll_event(fd.0 as isize)? {
+                    match context {
+                        PollContext::Write(len) => {
+                            return Poll::Ready(Ok(len));
+                        }
+                        _ => {
+                            panic!("expect PollContext::Connect, but got {:?}", context);
+                        }
+                    }
+                }
+
+                let buffers = [WSABUF {
+                    buf: PSTR(buff.as_ptr() as *mut u8),
+                    len: buff.len() as u32,
+                }];
+
+                let mut send_bytes = 0u32;
+
+                let overlapped = PollerOVERLAPPED::new(
+                    PollRequest::Writable(fd.0 as isize),
+                    PollContext::Write(0),
+                );
+
+                let overlapped = Some(overlapped.into());
+
+                unsafe {
+                    if WSASend(
+                        fd,
+                        &buffers,
+                        Some(&mut send_bytes as *mut u32),
+                        0,
+                        overlapped,
+                        None,
+                    ) != 0
+                    {
+                        if WSAGetLastError().0 as u32 != ERROR_IO_PENDING {
+                            _ = Box::<PollerOVERLAPPED>::from(overlapped.unwrap());
+
+                            return Err(Error::last_os_error())?;
+                        }
+                    } else {
+                        _ = Box::<PollerOVERLAPPED>::from(overlapped.unwrap());
+
+                        return Poll::Ready(Ok(send_bytes as usize));
+                    }
+                }
+            }
+        }
+
+        self.poller.on_event(
+            PollRequest::Writable(fd.0 as isize),
+            cx.waker().clone(),
+            timeout,
+        );
+
+        Poll::Pending
     }
 }
