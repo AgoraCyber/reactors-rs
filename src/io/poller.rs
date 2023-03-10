@@ -16,6 +16,9 @@ pub trait Poller {
     /// Register a one-time listener([`Waker`]) for [`fd`](RawFd)
     fn once(&mut self, fd: RawFd, r#type: <Self::Event as Event>::Name, waker: Waker);
 
+    /// Cancel all listener of [`fd`](RawFd)
+    fn cancel_all(&mut self, fd: RawFd);
+
     /// Get underlay multiplexer io handle.
     fn io_handle(&self) -> RawFd;
 }
