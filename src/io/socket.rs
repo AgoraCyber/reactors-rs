@@ -8,15 +8,10 @@ pub mod udp;
 pub mod sys {
     use std::{io::Result, net::SocketAddr, task::Poll, time::Duration};
 
-    use crate::{
-        io::{Poller, RawFd},
-        Reactor,
-    };
+    use crate::io::{IoReactor, RawFd};
 
     /// System native socket interface.
     pub trait Socket: Sized {
-        type Reactor: Reactor + Poller + Clone + 'static;
-
         /// Create new system raw socket
         fn socket(ip_v4: bool, sock_type: i32, protocol: i32) -> Result<RawFd>;
 
@@ -31,8 +26,8 @@ pub mod sys {
         /// Stream socket start listen incoming connection.
         fn listen(fd: RawFd) -> Result<()>;
 
-        /// Create new wrapper socket and bind to [`reactor`](Reactor)
-        fn new(fd: RawFd, reactor: Self::Reactor) -> Result<Self>;
+        /// Create new wrapper socket and bind to [`reactor`](IoReactor)
+        fn new(fd: RawFd, reactor: IoReactor) -> Result<Self>;
 
         /// Close native socket
         fn close(&mut self);

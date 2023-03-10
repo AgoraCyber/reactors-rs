@@ -5,38 +5,30 @@ use std::{io::Result, net::SocketAddr, task::Poll, time::Duration};
 
 use futures::{AsyncRead, AsyncWrite, Future, Stream};
 
-use crate::io::Poller;
-use crate::{Reactor, ReactorHandle};
+use crate::io::IoReactor;
+use crate::ReactorHandle;
 
 use super::sys::{self, Socket};
 use super::Handle;
 
 /// Tcp connection socket facade.
-pub struct TcpConnection<R>(Handle<R>)
-where
-    R: Reactor + Poller + Unpin + Clone + 'static;
+pub struct TcpConnection(Handle);
 
 /// Convert tcp connection from [`SocketHandle`]
-impl<R> From<Handle<R>> for TcpConnection<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
-    fn from(value: Handle<R>) -> Self {
+impl From<Handle> for TcpConnection {
+    fn from(value: Handle) -> Self {
         Self(value)
     }
 }
 
-impl<R> TcpConnection<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static + Debug,
-{
+impl TcpConnection {
     /// Create new tcp client socket and return [`TcpConnect`] future.
     pub fn connect(
-        reactor: R,
+        reactor: IoReactor,
         remote: SocketAddr,
         bind_addr: Option<SocketAddr>,
         timeout: Option<Duration>,
-    ) -> TcpConnect<R> {
+    ) -> TcpConnect {
         match Self::client(reactor, remote, bind_addr) {
             Ok(handle) => TcpConnect {
                 error: None,
@@ -53,21 +45,25 @@ where
         }
     }
 
-    fn client(poller: R, remote: SocketAddr, bind_addr: Option<SocketAddr>) -> Result<Handle<R>> {
+    fn client(
+        poller: IoReactor,
+        remote: SocketAddr,
+        bind_addr: Option<SocketAddr>,
+    ) -> Result<Handle> {
         let socket = match remote {
-            SocketAddr::V4(_) => Handle::<R>::tcp(true),
-            SocketAddr::V6(_) => Handle::<R>::tcp(false),
+            SocketAddr::V4(_) => Handle::tcp(true),
+            SocketAddr::V6(_) => Handle::tcp(false),
         }?;
 
         if let Some(addr) = bind_addr {
-            Handle::<R>::bind(socket, addr)?;
+            Handle::bind(socket, addr)?;
         }
 
         Handle::new(socket, poller)
     }
 
     /// Convert tcp connection to read stream
-    pub fn to_read_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> TcpConnectionReader<R> {
+    pub fn to_read_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> TcpConnectionReader {
         TcpConnectionReader {
             handle: self.0.clone(),
             timeout: timeout.into(),
@@ -75,7 +71,7 @@ where
     }
 
     /// Convert tcp connection to write stream.
-    pub fn to_write_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> TcpConnectionWriter<R> {
+    pub fn to_write_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> TcpConnectionWriter {
         TcpConnectionWriter {
             handle: self.0.clone(),
             timeout: timeout.into(),
@@ -85,21 +81,15 @@ where
 
 /// Tcp connect future.
 #[derive(Debug)]
-pub struct TcpConnect<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static + Debug,
-{
+pub struct TcpConnect {
     error: Option<Error>,
-    handle: Option<Handle<R>>,
+    handle: Option<Handle>,
     remote: SocketAddr,
     timeout: Option<Duration>,
 }
 
-impl<R> Future for TcpConnect<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static + Debug,
-{
-    type Output = Result<TcpConnection<R>>;
+impl Future for TcpConnect {
+    type Output = Result<TcpConnection>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -130,18 +120,12 @@ where
 }
 
 /// Tcp connection read stream.
-pub struct TcpConnectionReader<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
-    handle: Handle<R>,
+pub struct TcpConnectionReader {
+    handle: Handle,
     timeout: Option<Duration>,
 }
 
-impl<R> AsyncRead for TcpConnectionReader<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
+impl AsyncRead for TcpConnectionReader {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -154,18 +138,12 @@ where
 }
 
 /// TcpConnection write stream
-pub struct TcpConnectionWriter<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
-    handle: Handle<R>,
+pub struct TcpConnectionWriter {
+    handle: Handle,
     timeout: Option<Duration>,
 }
 
-impl<R> AsyncWrite for TcpConnectionWriter<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
+impl AsyncWrite for TcpConnectionWriter {
     fn poll_close(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -191,29 +169,21 @@ where
     }
 }
 
-pub struct TcpAcceptor<R>(Handle<R>)
-where
-    R: Reactor + Poller + Unpin + Clone + 'static;
+pub struct TcpAcceptor(Handle);
 
-impl<R> TcpAcceptor<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
+impl TcpAcceptor {
     /// Create new tcp listener with [`listen_addr`](SocketAddr)
-    pub fn new(reactor: R, listen_addr: SocketAddr) -> Result<Self> {
-        let handle = Handle::<R>::tcp(listen_addr.is_ipv4())?;
+    pub fn new(reactor: IoReactor, listen_addr: SocketAddr) -> Result<Self> {
+        let handle = Handle::tcp(listen_addr.is_ipv4())?;
 
-        Handle::<R>::listen(handle)?;
+        Handle::listen(handle)?;
 
         Ok(Self(Handle::new(handle, reactor)?))
     }
 }
 
-impl<R> Stream for TcpAcceptor<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
-    type Item = Result<(TcpConnection<R>, SocketAddr)>;
+impl Stream for TcpAcceptor {
+    type Item = Result<(TcpConnection, SocketAddr)>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -234,7 +204,7 @@ where
                 let handle =
                     handle.expect("Underlay accept returns success, but not set tcp handle");
                 return Poll::Ready(Some(Ok((
-                    TcpConnection::from(Handle::<R>::new(handle, self.0.reactor.clone())?),
+                    TcpConnection::from(Handle::new(handle, self.0.reactor.clone())?),
                     remote.expect("Underlay accept returns success, but not set remote address"),
                 ))));
             }

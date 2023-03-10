@@ -14,39 +14,30 @@ use os_socketaddr::OsSocketAddr;
 use winapi::{shared::ws2def::*, um::ioapiset::*, um::winsock2::*};
 
 use crate::{
-    io::{Poller, RawFd},
-    Reactor, ReactorHandle,
+    io::{IoReactor, RawFd},
+    ReactorHandle,
 };
 
 use super::sys::{self, Socket};
 
 /// Socket handle wrapper.
 #[derive(Debug, Clone)]
-pub struct Handle<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
+pub struct Handle {
     /// Socket handle bind reactor
-    pub reactor: R,
+    pub reactor: IoReactor,
     /// Socket handle bind os fd.
     pub fd: Arc<SOCKET>,
 
     pub closed: Arc<AtomicBool>,
 }
 
-impl<R> Handle<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
+impl Handle {
     fn to_raw_fd(&self) -> RawFd {
         *self.fd as RawFd
     }
 }
 
-impl<R> Drop for Handle<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
+impl Drop for Handle {
     fn drop(&mut self) {
         // Only self alive.
         if Arc::strong_count(&self.fd) == 1 {
@@ -55,12 +46,7 @@ where
     }
 }
 
-impl<R> sys::Socket for Handle<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
-    type Reactor = R;
-
+impl sys::Socket for Handle {
     fn bind(fd: RawFd, addr: std::net::SocketAddr) -> Result<()> {
         unsafe {
             let addr: OsSocketAddr = addr.into();
@@ -83,7 +69,7 @@ where
         }
     }
 
-    fn new(fd: RawFd, reactor: Self::Reactor) -> Result<Self> {
+    fn new(fd: RawFd, reactor: IoReactor) -> Result<Self> {
         // bind fd to completion port.
         unsafe {
             let completion_port = reactor.io_handle();
@@ -172,10 +158,7 @@ where
 }
 
 #[allow(unused)]
-impl<R> ReactorHandle for Handle<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
+impl ReactorHandle for Handle {
     type ReadBuffer<'cx> = sys::ReadBuffer<'cx>;
     type WriteBuffer<'cx> = sys::WriteBuffer<'cx>;
 
