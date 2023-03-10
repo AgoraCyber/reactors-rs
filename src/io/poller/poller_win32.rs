@@ -21,6 +21,10 @@ use super::{Event, Key, RawFd};
 pub enum EventName {
     Connect,
     Accept,
+    Read,
+    RecvFrom,
+    Write,
+    SendTo,
 }
 
 /// Event message for IOCP
@@ -28,6 +32,10 @@ pub enum EventName {
 pub enum EventMessage {
     Connect,
     Accept(RawFd, Option<SocketAddr>),
+    Read(usize),
+    RecvFrom(usize, Option<SocketAddr>),
+    Write(usize),
+    SendTo(usize),
 }
 
 /// Overlapped structure used by IOCP system.
@@ -39,9 +47,11 @@ pub(crate) struct ReactorOverlapped {
     /// For accept socket
     pub accept_fd: RawFd,
     /// Send/Recv buff
-    pub buff: WSABUF,
+    pub buff: [WSABUF; 1],
     /// Used by `AcceptEx`
     pub addrs: [u8; size_of::<SOCKADDR_IN6>() * 2],
+    /// Address len
+    pub addr_len: i32,
     /// operator name
     pub event_name: EventName,
 }
@@ -53,6 +63,7 @@ impl ReactorOverlapped {
             Self {
                 overlapped: std::mem::zeroed(),
                 fd,
+                addr_len: size_of::<SOCKADDR_IN6>() as i32,
                 accept_fd: std::mem::zeroed(),
                 buff: std::mem::zeroed(),
                 addrs: std::mem::zeroed(),
@@ -186,6 +197,77 @@ impl SysPoller {
                                     events.push(Event {
                                         key: Key(o.fd, EventName::Connect),
                                         message: Ok(EventMessage::Connect),
+                                    })
+                                }
+                            }
+                            EventName::Read => {
+                                if o.overlapped.Internal != ERROR_SUCCESS as usize {
+                                    events.push(Event {
+                                        key: Key(o.fd, EventName::Read),
+                                        message: Err(Error::from_raw_os_error(
+                                            o.overlapped.Internal as i32,
+                                        )),
+                                    })
+                                } else {
+                                    events.push(Event {
+                                        key: Key(o.fd, EventName::Read),
+                                        message: Ok(EventMessage::Read(o.overlapped.InternalHigh)),
+                                    })
+                                }
+                            }
+                            EventName::RecvFrom => {
+                                if o.overlapped.Internal != ERROR_SUCCESS as usize {
+                                    events.push(Event {
+                                        key: Key(o.fd, EventName::RecvFrom),
+                                        message: Err(Error::from_raw_os_error(
+                                            o.overlapped.Internal as i32,
+                                        )),
+                                    })
+                                } else {
+                                    let addr = OsSocketAddr::copy_from_raw(
+                                        o.addrs[size_of::<SOCKADDR_IN6>()..].as_ptr()
+                                            as *mut SOCKADDR,
+                                        size_of::<SOCKADDR_IN6>() as i32,
+                                    );
+
+                                    events.push(Event {
+                                        key: Key(o.fd, EventName::RecvFrom),
+                                        message: Ok(EventMessage::RecvFrom(
+                                            o.overlapped.InternalHigh,
+                                            addr.into(),
+                                        )),
+                                    })
+                                }
+                            }
+                            EventName::Write => {
+                                if o.overlapped.Internal != ERROR_SUCCESS as usize {
+                                    events.push(Event {
+                                        key: Key(o.fd, EventName::Write),
+                                        message: Err(Error::from_raw_os_error(
+                                            o.overlapped.Internal as i32,
+                                        )),
+                                    })
+                                } else {
+                                    events.push(Event {
+                                        key: Key(o.fd, EventName::Write),
+                                        message: Ok(EventMessage::Write(o.overlapped.InternalHigh)),
+                                    })
+                                }
+                            }
+                            EventName::SendTo => {
+                                if o.overlapped.Internal != ERROR_SUCCESS as usize {
+                                    events.push(Event {
+                                        key: Key(o.fd, EventName::SendTo),
+                                        message: Err(Error::from_raw_os_error(
+                                            o.overlapped.Internal as i32,
+                                        )),
+                                    })
+                                } else {
+                                    events.push(Event {
+                                        key: Key(o.fd, EventName::SendTo),
+                                        message: Ok(EventMessage::SendTo(
+                                            o.overlapped.InternalHigh,
+                                        )),
                                     })
                                 }
                             }

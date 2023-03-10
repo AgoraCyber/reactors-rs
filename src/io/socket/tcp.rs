@@ -244,7 +244,8 @@ impl Stream for TcpAcceptor {
 #[cfg(test)]
 mod tests {
 
-    use futures::{FutureExt, TryStreamExt};
+    use async_std::io::WriteExt;
+    use futures::{AsyncReadExt, FutureExt, TryStreamExt};
     use futures_test::task::noop_context;
 
     use crate::{io::IoReactor, Reactor};
@@ -267,17 +268,24 @@ mod tests {
 
         let mut connect = TcpConnection::connect(reactor.clone(), listen_addr, None, None);
 
+        let client_connection: TcpConnection;
+
         // try connect
         loop {
             match connect.poll_unpin(&mut noop_context()) {
                 Poll::Pending => {
                     reactor.poll_once(Duration::from_secs(1)).unwrap();
                 }
-                _ => break,
+                Poll::Ready(result) => {
+                    client_connection = result.unwrap();
+                    break;
+                }
             }
         }
 
         let mut try_next = acceptor.try_next();
+
+        let server_connection: TcpConnection;
 
         // Accept one
         loop {
@@ -285,7 +293,45 @@ mod tests {
                 Poll::Pending => {
                     reactor.poll_once(Duration::from_secs(1)).unwrap();
                 }
-                _ => break,
+                Poll::Ready(result) => {
+                    (server_connection, _) = result.unwrap().unwrap();
+                    break;
+                }
+            }
+        }
+
+        let mut write_stream = client_connection.to_write_stream(None);
+
+        let mut write = write_stream.write(&b"hello world"[..]);
+
+        loop {
+            match write.poll_unpin(&mut noop_context()) {
+                Poll::Pending => {
+                    reactor.poll_once(Duration::from_secs(1)).unwrap();
+                }
+                Poll::Ready(result) => {
+                    assert_eq!(result.unwrap(), 11);
+                    break;
+                }
+            }
+        }
+
+        let mut read_stream = server_connection.to_read_stream(None);
+
+        let mut buff = [0u8; 32];
+
+        let mut read = read_stream.read(&mut buff);
+
+        loop {
+            match read.poll_unpin(&mut noop_context()) {
+                Poll::Pending => {
+                    reactor.poll_once(Duration::from_secs(1)).unwrap();
+                }
+                Poll::Ready(result) => {
+                    assert_eq!(result.unwrap(), 11);
+                    assert_eq!(&buff[..11], b"hello world");
+                    break;
+                }
             }
         }
     }

@@ -26,7 +26,7 @@ use crate::{
     ReactorHandle,
 };
 
-use super::sys::{self, ReadBuffer, Socket};
+use super::sys::{self, ReadBuffer, Socket, WriteBuffer};
 
 /// Socket handle wrapper.
 #[derive(Debug, Clone)]
@@ -227,7 +227,12 @@ impl ReactorHandle for Handle {
         buffer: Self::WriteBuffer<'cx>,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<Result<usize>> {
-        unimplemented!()
+        match buffer {
+            WriteBuffer::Datagram(buff, remote) => {
+                self.poll_write_datagram(cx, buff, remote, timeout)
+            }
+            WriteBuffer::Stream(buff) => self.poll_write_stream(cx, buff, timeout),
+        }
     }
 
     fn poll_close(
@@ -324,15 +329,13 @@ impl Handle {
         unsafe {
             (*overlapped).accept_fd = accept_socket;
 
-            let addr_len = (*overlapped).addrs.len() / 2;
-
             let ret = AcceptEx(
                 fd as usize,
                 accept_socket as usize,
                 (*overlapped).addrs.as_mut_ptr() as *mut c_void,
                 0,
-                addr_len as u32,
-                addr_len as u32,
+                (*overlapped).addr_len as u32,
+                (*overlapped).addr_len as u32,
                 &mut bytes_received,
                 overlapped as *mut OVERLAPPED,
             );
@@ -364,26 +367,283 @@ impl Handle {
                 return Poll::Pending;
             }
 
+            // Release overlapped
+            let _: Box<ReactorOverlapped> = overlapped.into();
+
             return Poll::Ready(Err(Error::last_os_error()));
         }
     }
 
     fn poll_read_datagram<'cx>(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         buff: &'cx mut [u8],
         remote: &'cx mut Option<SocketAddr>,
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<Result<usize>> {
-        unimplemented!()
+        let fd = self.to_raw_fd();
+
+        if let Some(event) = self.reactor.poll_io_event(fd, EventName::RecvFrom)? {
+            match event.message? {
+                EventMessage::RecvFrom(len, addr) => {
+                    *remote = addr;
+
+                    return Poll::Ready(Ok(len));
+                }
+                _ => {
+                    panic!("Inner error")
+                }
+            }
+        }
+
+        let overlapped = ReactorOverlapped::new_raw(fd, EventName::RecvFrom);
+
+        unsafe {
+            (*overlapped).buff[0].buf = buff.as_mut_ptr() as *mut i8;
+
+            (*overlapped).buff[0].len = buff.len() as u32;
+
+            let mut bytes_received = 0u32;
+
+            let mut flag = 0u32;
+
+            let ret = WSARecvFrom(
+                fd as usize,
+                (*overlapped).buff.as_mut_ptr() as *mut WSABUF,
+                1,
+                &mut bytes_received,
+                &mut flag,
+                (*overlapped).addrs.as_mut_ptr() as *mut SOCKADDR,
+                &mut (*overlapped).addr_len,
+                overlapped as *mut OVERLAPPED,
+                None,
+            );
+
+            //  operation has completed immediately
+            if ret == 0 {
+                let overlapped: Box<ReactorOverlapped> = overlapped.into();
+
+                let addr = OsSocketAddr::copy_from_raw(
+                    overlapped.addrs[..overlapped.addr_len as usize].as_ptr() as *mut SOCKADDR,
+                    overlapped.addr_len,
+                );
+
+                *remote = addr.into();
+
+                return Poll::Ready(Ok(bytes_received as usize));
+            } else {
+                let e = WSAGetLastError();
+
+                if WSA_IO_PENDING == e {
+                    self.reactor
+                        .once(fd, EventName::RecvFrom, cx.waker().clone(), timeout);
+
+                    return Poll::Pending;
+                }
+
+                // Release overlapped
+                let _: Box<ReactorOverlapped> = overlapped.into();
+
+                return Poll::Ready(Err(Error::last_os_error()));
+            }
+        }
     }
 
     fn poll_read_stream<'cx>(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         buff: &'cx mut [u8],
         timeout: Option<std::time::Duration>,
     ) -> std::task::Poll<Result<usize>> {
-        unimplemented!()
+        let fd = self.to_raw_fd();
+
+        if let Some(event) = self.reactor.poll_io_event(fd, EventName::Read)? {
+            match event.message? {
+                EventMessage::Read(len) => {
+                    return Poll::Ready(Ok(len));
+                }
+                _ => {
+                    panic!("Inner error")
+                }
+            }
+        }
+
+        let overlapped = ReactorOverlapped::new_raw(fd, EventName::Read);
+
+        log::trace!("socket({:?}) recv({})", fd, buff.len(),);
+
+        let mut flag = 0u32;
+
+        unsafe {
+            (*overlapped).buff[0].buf = buff.as_ptr() as *mut i8;
+
+            (*overlapped).buff[0].len = buff.len() as u32;
+
+            let mut bytes_received = 0u32;
+
+            let ret = WSARecv(
+                fd as usize,
+                &mut (*overlapped).buff as *mut WSABUF,
+                1,
+                &mut bytes_received,
+                &mut flag,
+                overlapped as *mut OVERLAPPED,
+                None,
+            );
+
+            log::trace!("socket({:?}) recv({}) result({})", fd, buff.len(), ret);
+
+            //  operation has completed immediately
+            if ret == 0 {
+                let _: Box<ReactorOverlapped> = overlapped.into();
+
+                return Poll::Ready(Ok(bytes_received as usize));
+            } else {
+                let e = WSAGetLastError();
+
+                if WSA_IO_PENDING == e {
+                    self.reactor
+                        .once(fd, EventName::Read, cx.waker().clone(), timeout);
+
+                    return Poll::Pending;
+                }
+
+                // Release overlapped
+                let _: Box<ReactorOverlapped> = overlapped.into();
+
+                return Poll::Ready(Err(Error::last_os_error()));
+            }
+        }
+    }
+
+    fn poll_write_datagram<'cx>(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buff: &'cx [u8],
+        remote: &'cx SocketAddr,
+        timeout: Option<std::time::Duration>,
+    ) -> std::task::Poll<Result<usize>> {
+        let fd = self.to_raw_fd();
+
+        if let Some(event) = self.reactor.poll_io_event(fd, EventName::SendTo)? {
+            match event.message? {
+                EventMessage::SendTo(len) => {
+                    return Poll::Ready(Ok(len));
+                }
+                _ => {
+                    panic!("Inner error")
+                }
+            }
+        }
+
+        let overlapped = ReactorOverlapped::new_raw(fd, EventName::SendTo);
+
+        let addr = OsSocketAddr::from(remote.clone());
+
+        unsafe {
+            (*overlapped).buff[0].buf = buff.as_ptr() as *mut i8;
+
+            (*overlapped).buff[0].len = buff.len() as u32;
+
+            let mut bytes_received = 0u32;
+
+            let ret = WSASendTo(
+                fd as usize,
+                (*overlapped).buff.as_mut_ptr() as *mut WSABUF,
+                1,
+                &mut bytes_received,
+                0,
+                addr.as_ptr() as *mut SOCKADDR,
+                addr.len(),
+                overlapped as *mut OVERLAPPED,
+                None,
+            );
+
+            //  operation has completed immediately
+            if ret == 0 {
+                let _: Box<ReactorOverlapped> = overlapped.into();
+
+                return Poll::Ready(Ok(bytes_received as usize));
+            } else {
+                let e = WSAGetLastError();
+
+                if WSA_IO_PENDING == e {
+                    self.reactor
+                        .once(fd, EventName::SendTo, cx.waker().clone(), timeout);
+
+                    return Poll::Pending;
+                }
+
+                // Release overlapped
+                let _: Box<ReactorOverlapped> = overlapped.into();
+
+                return Poll::Ready(Err(Error::last_os_error()));
+            }
+        }
+    }
+
+    fn poll_write_stream<'cx>(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &std::task::Context<'_>,
+        buff: &'cx [u8],
+        timeout: Option<std::time::Duration>,
+    ) -> std::task::Poll<Result<usize>> {
+        let fd = self.to_raw_fd();
+
+        if let Some(event) = self.reactor.poll_io_event(fd, EventName::Write)? {
+            match event.message? {
+                EventMessage::Write(len) => {
+                    return Poll::Ready(Ok(len));
+                }
+                _ => {
+                    panic!("Inner error")
+                }
+            }
+        }
+
+        let overlapped = ReactorOverlapped::new_raw(fd, EventName::Write);
+
+        log::trace!("socket({:?}) send({})", fd, buff.len());
+
+        unsafe {
+            (*overlapped).buff[0].buf = buff.as_ptr() as *mut i8;
+
+            (*overlapped).buff[0].len = buff.len() as u32;
+
+            let mut bytes_received = 0u32;
+
+            let ret = WSASend(
+                fd as usize,
+                (*overlapped).buff.as_mut_ptr() as *mut WSABUF,
+                1,
+                &mut bytes_received,
+                0,
+                overlapped as *mut OVERLAPPED,
+                None,
+            );
+
+            log::trace!("socket({:?}) send({}) result({})", fd, buff.len(), ret);
+
+            //  operation has completed immediately
+            if ret == 0 {
+                let _: Box<ReactorOverlapped> = overlapped.into();
+
+                return Poll::Ready(Ok(bytes_received as usize));
+            } else {
+                let e = WSAGetLastError();
+
+                if WSA_IO_PENDING == e {
+                    self.reactor
+                        .once(fd, EventName::SendTo, cx.waker().clone(), timeout);
+
+                    return Poll::Pending;
+                }
+
+                // Release overlapped
+                let _: Box<ReactorOverlapped> = overlapped.into();
+
+                return Poll::Ready(Err(Error::last_os_error()));
+            }
+        }
     }
 }
