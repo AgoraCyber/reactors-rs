@@ -114,6 +114,12 @@ impl IoReactor {
     }
 }
 
+impl Default for IoReactor {
+    fn default() -> Self {
+        Self::new(Duration::from_secs(1)).unwrap()
+    }
+}
+
 impl IoReactor {
     pub fn new(tick_duration: Duration) -> Result<Self> {
         let poller = SysPoller::new()?;

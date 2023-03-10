@@ -26,8 +26,10 @@ pub mod sys {
         /// Stream socket start listen incoming connection.
         fn listen(fd: RawFd) -> Result<()>;
 
-        /// Create new wrapper socket and bind to [`reactor`](IoReactor)
-        fn new(fd: RawFd, reactor: IoReactor) -> Result<Self>;
+        /// Create new wrapper socket and bind to [`reactor`](IoReactor).
+        ///
+        /// If this method return an error, the implementation must release the input `fd` resource.
+        fn new(ip_v4: bool, fd: RawFd, reactor: IoReactor) -> Result<Self>;
 
         /// Close native socket
         fn close(&mut self);

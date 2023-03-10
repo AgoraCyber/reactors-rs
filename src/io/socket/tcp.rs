@@ -57,9 +57,17 @@ impl TcpConnection {
 
         if let Some(addr) = bind_addr {
             Handle::bind(socket, addr)?;
+        } else {
+            let bind_addr = if remote.is_ipv4() {
+                "0.0.0.0:0".parse().expect("random bind address for ipv4")
+            } else {
+                "[::]:0".parse().expect("random bind address for ipv6")
+            };
+
+            Handle::bind(socket, bind_addr)?;
         }
 
-        Handle::new(socket, poller)
+        Handle::new(remote.is_ipv4(), socket, poller)
     }
 
     /// Convert tcp connection to read stream
@@ -169,16 +177,28 @@ impl AsyncWrite for TcpConnectionWriter {
     }
 }
 
-pub struct TcpAcceptor(Handle);
+pub struct TcpAcceptor(Handle, Option<IoReactor>);
 
 impl TcpAcceptor {
     /// Create new tcp listener with [`listen_addr`](SocketAddr)
-    pub fn new(reactor: IoReactor, listen_addr: SocketAddr) -> Result<Self> {
+    ///
+    /// If `connection_reactor` is not [`None`],
+    /// the incoming connections will bind to that [`reactor`](IoReactor) instance
+    pub fn new(
+        reactor: IoReactor,
+        listen_addr: SocketAddr,
+        connection_reactor: Option<IoReactor>,
+    ) -> Result<Self> {
         let handle = Handle::tcp(listen_addr.is_ipv4())?;
+
+        Handle::bind(handle, listen_addr)?;
 
         Handle::listen(handle)?;
 
-        Ok(Self(Handle::new(handle, reactor)?))
+        Ok(Self(
+            Handle::new(listen_addr.is_ipv4(), handle, reactor)?,
+            connection_reactor,
+        ))
     }
 }
 
@@ -203,12 +223,70 @@ impl Stream for TcpAcceptor {
             Poll::Ready(Ok(_)) => {
                 let handle =
                     handle.expect("Underlay accept returns success, but not set tcp handle");
+
+                // bind incoming connection to another io reactor instance.
+                let reactor = if let Some(connection_reactor) = &self.1 {
+                    connection_reactor.clone()
+                } else {
+                    self.0.reactor.clone()
+                };
+
                 return Poll::Ready(Some(Ok((
-                    TcpConnection::from(Handle::new(handle, self.0.reactor.clone())?),
+                    TcpConnection::from(Handle::new(self.0.ip_v4, handle, reactor)?),
                     remote.expect("Underlay accept returns success, but not set remote address"),
                 ))));
             }
             Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use futures::{FutureExt, TryStreamExt};
+    use futures_test::task::noop_context;
+
+    use crate::{io::IoReactor, Reactor};
+
+    use super::*;
+
+    #[futures_test::test]
+    async fn test_acceptor() {
+        _ = pretty_env_logger::try_init();
+
+        let mut reactor = IoReactor::default();
+
+        let listen_addr = "127.0.0.1:1812".parse().unwrap();
+
+        let mut acceptor = TcpAcceptor::new(reactor.clone(), listen_addr, None).unwrap();
+
+        reactor.poll_once(Duration::from_secs(1)).unwrap();
+
+        // assert_stream_pending!(acceptor);
+
+        let mut connect = TcpConnection::connect(reactor.clone(), listen_addr, None, None);
+
+        // try connect
+        loop {
+            match connect.poll_unpin(&mut noop_context()) {
+                Poll::Pending => {
+                    reactor.poll_once(Duration::from_secs(1)).unwrap();
+                }
+                _ => break,
+            }
+        }
+
+        let mut try_next = acceptor.try_next();
+
+        // Accept one
+        loop {
+            match try_next.poll_unpin(&mut noop_context()) {
+                Poll::Pending => {
+                    reactor.poll_once(Duration::from_secs(1)).unwrap();
+                }
+                _ => break,
+            }
         }
     }
 }
