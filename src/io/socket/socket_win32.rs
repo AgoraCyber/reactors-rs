@@ -11,7 +11,7 @@ use std::{
 };
 
 use os_socketaddr::OsSocketAddr;
-use winapi::{shared::ws2def::*, um::winsock2::*};
+use winapi::{shared::ws2def::*, um::ioapiset::*, um::winsock2::*};
 
 use crate::{
     io::{Poller, RawFd},
@@ -40,19 +40,6 @@ where
 {
     fn to_raw_fd(&self) -> RawFd {
         *self.fd as RawFd
-    }
-}
-
-impl<R> From<(R, SOCKET)> for Handle<R>
-where
-    R: Reactor + Poller + Unpin + Clone + 'static,
-{
-    fn from(value: (R, SOCKET)) -> Self {
-        Handle {
-            reactor: value.0,
-            fd: Arc::new(value.1),
-            closed: Default::default(),
-        }
     }
 }
 
@@ -97,7 +84,22 @@ where
     }
 
     fn new(fd: RawFd, reactor: Self::Reactor) -> Result<Self> {
-        Ok((reactor, fd as SOCKET).into())
+        // bind fd to completion port.
+        unsafe {
+            let completion_port = reactor.io_handle();
+
+            let ret = CreateIoCompletionPort(fd, completion_port, 0, 0);
+
+            if ret == null_mut() {
+                return Err(Error::last_os_error());
+            }
+        }
+
+        Ok(Self {
+            reactor,
+            fd: Arc::new(fd as usize),
+            closed: Default::default(),
+        })
     }
 
     fn socket(ip_v4: bool, sock_type: i32, protocol: i32) -> Result<RawFd> {
@@ -154,11 +156,17 @@ where
     /// Start an async connect operator.
     #[allow(unused)]
     fn poll_connect(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         remote: SocketAddr,
         timeout: Option<Duration>,
     ) -> Poll<Result<()>> {
+        // socket fd
+        let fd = self.to_raw_fd();
+
+        // Check if previous io event is ready.
+        // if let Some(result) = self.reactor.poll_io_event(fd)? {}
+
         unimplemented!()
     }
 }
