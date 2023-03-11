@@ -66,6 +66,21 @@ impl sys::Socket for Handle {
 
     fn listen(fd: RawFd) -> Result<()> {
         unsafe {
+            let on: c_int = 1;
+
+            let len = size_of::<c_int>() as u32;
+
+            if setsockopt(
+                fd,
+                SOL_SOCKET,
+                SO_REUSEADDR,
+                on.to_be_bytes().as_ptr() as *const libc::c_void,
+                len,
+            ) < 0
+            {
+                return Err(Error::last_os_error());
+            }
+
             if listen(fd, SOMAXCONN as i32) < 0 {
                 return Err(Error::last_os_error());
             } else {
@@ -103,6 +118,8 @@ impl sys::Socket for Handle {
     }
 
     fn close(&mut self) {
+        log::trace!("close fd({})", *self.fd);
+
         unsafe {
             close(*self.fd);
         }
