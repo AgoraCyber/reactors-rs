@@ -42,7 +42,8 @@ pub enum EventMessage {
 #[repr(C)]
 #[derive(Clone)]
 pub(crate) struct ReactorOverlapped {
-    overlapped: OVERLAPPED,
+    pub overlapped: OVERLAPPED,
+
     pub fd: RawFd,
     /// For accept socket
     pub accept_fd: RawFd,
@@ -276,12 +277,11 @@ impl SysPoller {
                 } else {
                     let e = GetLastError();
 
-                    log::info!("iocp poller({:?}) error: {}", self.iocp, e);
-
                     if e == ERROR_ABANDONED_WAIT_0 {
                         log::info!("iocp poller({:?}) closed", self.iocp);
                         return Ok(vec![]);
                     } else if e == WAIT_TIMEOUT {
+                        log::info!("iocp poller({:?}) timeout", self.iocp);
                         continue;
                     } else {
                         return Err(Error::last_os_error());

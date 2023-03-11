@@ -2,4 +2,5 @@
 mod poller;
 pub use poller::*;
 
+pub mod file;
 pub mod socket;
