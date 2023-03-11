@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use super::{Event, EventMessage, EventName, Key};
+use super::{Event, EventName, Key};
 
 /// Event for iocp system.
 ///
