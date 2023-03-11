@@ -1,4 +1,7 @@
 #[cfg_attr(target_family = "windows", path = "poller/poller_win32.rs")]
+#[cfg_attr(target_os = "macos", path = "poller/poller_kqueue.rs")]
+#[cfg_attr(target_os = "freebsd", path = "poller/poller_kqueue.rs")]
+#[cfg_attr(target_os = "ios", path = "poller/poller_kqueue.rs")]
 mod os;
 pub use os::*;
 

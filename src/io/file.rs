@@ -1,4 +1,5 @@
 #[cfg_attr(target_family = "windows", path = "file/file_win32.rs")]
+#[cfg_attr(target_family = "unix", path = "file/file_unix.rs")]
 mod impls;
 pub use impls::*;
 

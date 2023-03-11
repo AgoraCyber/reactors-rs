@@ -1,4 +1,5 @@
 #[cfg_attr(target_family = "windows", path = "socket/socket_win32.rs")]
+#[cfg_attr(target_family = "unix", path = "socket/socket_unix.rs")]
 mod socket;
 pub use socket::*;
 
