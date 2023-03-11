@@ -66,6 +66,7 @@ fn test_file_rw() {
 
 #[test]
 fn test_memory_leak() {
+    _ = pretty_env_logger::try_init();
     let mut reactor = IoReactor::default();
 
     let dir: PathBuf = env!("CARGO_TARGET_TMPDIR").into();
