@@ -1,7 +1,9 @@
-#[cfg_attr(target_family = "windows", path = "poller/poller_win32.rs")]
-#[cfg_attr(target_os = "macos", path = "poller/poller_kqueue.rs")]
-#[cfg_attr(target_os = "freebsd", path = "poller/poller_kqueue.rs")]
-#[cfg_attr(target_os = "ios", path = "poller/poller_kqueue.rs")]
+#[cfg_attr(target_family = "windows", path = "poller/iocp.rs")]
+#[cfg_attr(target_os = "macos", path = "poller/kqueue.rs")]
+#[cfg_attr(target_os = "freebsd", path = "poller/kqueue.rs")]
+#[cfg_attr(target_os = "ios", path = "poller/kqueue.rs")]
+#[cfg_attr(target_os = "linux", path = "poller/epoll.rs")]
+#[cfg_attr(target_os = "android", path = "poller/epoll.rs")]
 mod os;
 pub use os::*;
 
@@ -21,6 +23,16 @@ use crate::{timewheel::TimeWheel, Reactor};
 pub type RawFd = std::os::fd::RawFd;
 #[cfg(target_family = "windows")]
 pub type RawFd = winapi::shared::ntdef::HANDLE;
+
+#[cfg(target_family = "unix")]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+pub enum EventName {
+    Read,
+    Write,
+}
+
+#[cfg(target_family = "unix")]
+pub type EventMessage = ();
 
 #[derive(Debug, PartialEq, Hash, Eq, Clone)]
 pub struct Key(RawFd, EventName);
@@ -194,7 +206,11 @@ impl Reactor for IoReactor {
             keys
         };
 
-        let events = self.poller.poll_once(&event_keys, duration)?;
+        let events = if !event_keys.is_empty() {
+            self.poller.poll_once(&event_keys, duration)?
+        } else {
+            vec![]
+        };
 
         let (wakers, timeout_wakers) = {
             let mut wakers = vec![];

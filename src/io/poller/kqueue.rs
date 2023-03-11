@@ -4,17 +4,7 @@ use std::{
     time::Duration,
 };
 
-use super::{Event, Key};
-
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
-pub enum EventName {
-    Read,
-    Write,
-}
-
-/// Event message for IOCP
-// #[derive(Debug, Clone, PartialEq, Hash, Eq)]
-pub type EventMessage = ();
+use super::{Event, EventMessage, EventName, Key};
 
 /// Event for iocp system.
 ///
