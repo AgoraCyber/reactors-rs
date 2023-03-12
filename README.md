@@ -1,5 +1,7 @@
 # reactors
 
+[!["Crates.io version"](https://img.shields.io/crates/v/reactors.svg)](https://crates.io/crates/reactors) [!["docs.rs docs"](https://img.shields.io/badge/docs-latest-blue.svg)](https://docs.rs/reactors)
+
 **reactors** is a low-level asynchronous io wrapper library for rust [`futures`](https://docs.rs/futures/0.3.27/futures/)
 
 ## bench
