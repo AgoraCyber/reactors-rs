@@ -14,7 +14,7 @@ use super::Handle;
 /// Tcp connection socket facade.
 pub struct TcpConnection(Handle);
 
-/// Convert tcp connection from [`SocketHandle`]
+/// Convert tcp connection from [`Handle`]
 impl From<Handle> for TcpConnection {
     fn from(value: Handle) -> Self {
         Self(value)
@@ -244,7 +244,11 @@ impl Stream for TcpAcceptor {
 #[cfg(test)]
 mod tests {
 
-    use futures::{AsyncReadExt, AsyncWriteExt, FutureExt, TryStreamExt};
+    use std::thread::spawn;
+
+    use futures::{
+        executor::ThreadPool, task::SpawnExt, AsyncReadExt, AsyncWriteExt, FutureExt, TryStreamExt,
+    };
     use futures_test::task::noop_context;
 
     use crate::{io::IoReactor, Reactor};
@@ -333,5 +337,69 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[futures_test::test]
+    async fn test_multi_reactor() {
+        _ = pretty_env_logger::try_init();
+
+        let pool = ThreadPool::new().unwrap();
+
+        let mut acceptor_reactor = IoReactor::default();
+
+        let mut connection_reactor = IoReactor::default();
+
+        let listen_addr = "127.0.0.1:1812".parse().unwrap();
+
+        // Accept connection with seperate incoming connection reactor.
+        let mut acceptor = TcpAcceptor::new(
+            acceptor_reactor.clone(),
+            listen_addr,
+            Some(connection_reactor.clone()),
+        )
+        .unwrap();
+
+        let connect = TcpConnection::connect(connection_reactor.clone(), listen_addr, None, None);
+
+        pool.spawn(async move {
+            while let Some((conn, remote)) = acceptor.try_next().await.unwrap() {
+                log::info!("accept remote {}", remote);
+
+                let mut read_stream = conn.to_read_stream(None);
+                let mut write_stream = conn.to_write_stream(None);
+
+                let mut buff = [0u8; 11];
+
+                read_stream.read_exact(&mut buff).await.unwrap();
+
+                assert_eq!(&buff, b"hello world");
+
+                write_stream.write_all(&buff).await.unwrap();
+            }
+        })
+        .unwrap();
+
+        spawn(move || loop {
+            connection_reactor
+                .poll_once(Duration::from_millis(300))
+                .unwrap();
+
+            acceptor_reactor
+                .poll_once(Duration::from_millis(300))
+                .unwrap();
+        });
+
+        let connection = connect.await.unwrap();
+
+        let mut write_stream = connection.to_write_stream(None);
+        let mut read_stream = connection.to_read_stream(None);
+
+        write_stream.write_all(b"hello world").await.unwrap();
+
+        let mut buff = [0u8; 11];
+
+        read_stream.read_exact(&mut buff).await.unwrap();
+
+        assert_eq!(&buff, b"hello world");
     }
 }

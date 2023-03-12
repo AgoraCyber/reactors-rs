@@ -31,3 +31,8 @@ criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
 clap = { version = "4.1.8", registry = "rsproxy", features = ["derive"] }
 anyhow = "1.0.69"
 indicatif = "0.17.3"
+
+
+[[bench]]
+name = "echo"
+harness = false

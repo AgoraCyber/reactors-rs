@@ -11,7 +11,7 @@ use crate::ReactorHandle;
 /// Udp socket facade.
 pub struct UdpSocket(Handle);
 
-/// Convert udp socket from [`SocketHandle`]
+/// Convert udp socket from [`Handle`]
 impl From<Handle> for UdpSocket {
     fn from(value: Handle) -> Self {
         Self(value)

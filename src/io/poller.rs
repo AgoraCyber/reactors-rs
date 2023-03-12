@@ -52,7 +52,7 @@ impl Event {
         &self.key
     }
 
-    /// Create event from [`key`](key) and [`error`](Error)
+    /// Create event from [`key`](Key) and [`error`](Error)
     pub fn from_error(key: Key, err: Error) -> Self {
         Self {
             key,
