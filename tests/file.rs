@@ -1,7 +1,6 @@
 use std::{io::SeekFrom, path::PathBuf, task::Poll, time::Duration};
 
-use async_std::io::WriteExt;
-use futures::{AsyncReadExt, AsyncSeekExt, FutureExt};
+use futures::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, FutureExt};
 use futures_test::task::noop_context;
 use reactors::{
     io::{file::*, IoReactor},

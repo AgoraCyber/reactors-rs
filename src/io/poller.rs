@@ -240,3 +240,39 @@ impl Reactor for IoReactor {
         Ok(wakers.len() + timeout_wakers.len())
     }
 }
+
+#[cfg(all(test, target_family = "unix"))]
+mod tests {
+    use futures::task::noop_waker;
+
+    use super::*;
+
+    use std::io::ErrorKind;
+
+    #[test]
+    fn test_timeout() {
+        let mut reactor = IoReactor::default();
+
+        reactor.once(
+            0,
+            EventName::Read,
+            noop_waker(),
+            Some(Duration::from_secs(1)),
+        );
+
+        let raised = reactor.poll_once(Duration::from_secs(2)).unwrap();
+
+        assert_eq!(raised, 1);
+
+        assert_eq!(
+            reactor
+                .poll_io_event(0, EventName::Read)
+                .unwrap()
+                .unwrap()
+                .message
+                .unwrap_err()
+                .kind(),
+            ErrorKind::TimedOut
+        );
+    }
+}

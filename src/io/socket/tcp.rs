@@ -244,8 +244,7 @@ impl Stream for TcpAcceptor {
 #[cfg(test)]
 mod tests {
 
-    use async_std::io::WriteExt;
-    use futures::{AsyncReadExt, FutureExt, TryStreamExt};
+    use futures::{AsyncReadExt, AsyncWriteExt, FutureExt, TryStreamExt};
     use futures_test::task::noop_context;
 
     use crate::{io::IoReactor, Reactor};

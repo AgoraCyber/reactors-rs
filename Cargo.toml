@@ -10,7 +10,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-futures = { version = "^0.3" }
+futures = { version = "^0.3", features = ["thread-pool"] }
 log = "^0.4"
 errno = "0.3.0"
 os_socketaddr = "0.2.4"
@@ -24,10 +24,10 @@ libc = "^0.2"
 winapi = { version = "^0.3.9", features = ["ioapiset", "mswsock"] }
 
 [dev-dependencies]
+futures-test = "^0.3"
 pretty_env_logger = "^0.4"
-async-std = { version = "1.12.0", features = ["attributes"] }
-rand = { version = "0.8.5", features = ["getrandom"] }
-hex = "^0.4"
 tokio = { version = "1", features = ["full"] }
 criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
-futures-test = "^0.3"
+clap = { version = "4.1.8", registry = "rsproxy", features = ["derive"] }
+anyhow = "1.0.69"
+indicatif = "0.17.3"
