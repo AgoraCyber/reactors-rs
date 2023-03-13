@@ -2,7 +2,6 @@ use std::{
     ffi::c_void,
     io::{Error, Result, Seek, SeekFrom},
     os::windows::prelude::{FromRawHandle, IntoRawHandle, OpenOptionsExt},
-    ptr::null_mut,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -17,9 +16,7 @@ use crate::{
 
 use winapi::{
     shared::winerror::ERROR_IO_PENDING,
-    um::{
-        errhandlingapi::GetLastError, fileapi::*, handleapi::*, ioapiset::CreateIoCompletionPort,
-    },
+    um::{errhandlingapi::GetLastError, fileapi::*, handleapi::*},
     um::{minwinbase::*, winbase::*},
 };
 
@@ -48,7 +45,8 @@ impl Drop for Handle {
 impl Handle {
     fn close(&mut self) {
         unsafe {
-            self.reactor.cancel_all(*self.fd);
+            self.reactor.on_close_fd(self.to_raw_fd());
+
             CloseHandle(*self.fd);
         }
     }
@@ -60,7 +58,7 @@ impl Handle {
 
 impl sys::File for Handle {
     fn new<P: Into<std::path::PathBuf>>(
-        reactor: IoReactor,
+        mut reactor: IoReactor,
         path: P,
         ops: &mut std::fs::OpenOptions,
     ) -> std::io::Result<Self> {
@@ -70,16 +68,12 @@ impl sys::File for Handle {
             .into_raw_handle() as *mut winapi::ctypes::c_void;
 
         unsafe {
-            let completion_port = reactor.io_handle();
-
-            log::debug!("{:?} {:?}", raw_fd, completion_port);
-
-            let ret = CreateIoCompletionPort(raw_fd, completion_port, 0, 0);
-
-            if ret == null_mut() {
-                // release socket resource when this method raise an error.
-                CloseHandle(raw_fd);
-                return Err(Error::last_os_error());
+            match reactor.on_open_fd(raw_fd) {
+                Err(err) => {
+                    CloseHandle(raw_fd);
+                    return Err(err);
+                }
+                _ => {}
             }
         }
 

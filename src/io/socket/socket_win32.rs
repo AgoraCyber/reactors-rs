@@ -16,7 +16,6 @@ use once_cell::sync::OnceCell;
 use os_socketaddr::OsSocketAddr;
 use winapi::{
     shared::{guiddef::*, winerror::ERROR_IO_PENDING, ws2def::*},
-    um::ioapiset::*,
     um::{errhandlingapi::GetLastError, winsock2::*},
     um::{minwinbase::OVERLAPPED, mswsock::*},
 };
@@ -79,17 +78,16 @@ impl sys::Socket for Handle {
         }
     }
 
-    fn new(ip_v4: bool, fd: RawFd, reactor: IoReactor) -> Result<Self> {
+    fn new(ip_v4: bool, fd: RawFd, mut reactor: IoReactor) -> Result<Self> {
         // bind fd to completion port.
         unsafe {
-            let completion_port = reactor.io_handle();
-
-            let ret = CreateIoCompletionPort(fd, completion_port, 0, 0);
-
-            if ret == null_mut() {
-                // release socket resource when this method raise an error.
-                closesocket(fd as usize);
-                return Err(Error::last_os_error());
+            match reactor.on_open_fd(fd) {
+                Err(err) => {
+                    // release socket resource when this method raise an error.
+                    closesocket(fd as usize);
+                    return Err(err);
+                }
+                _ => {}
             }
         }
 
@@ -132,6 +130,8 @@ impl sys::Socket for Handle {
 
     fn close(&mut self) {
         log::debug!("close socket({:?})", self.to_raw_fd());
+        self.reactor.on_close_fd(self.to_raw_fd());
+
         unsafe {
             closesocket(*self.fd);
         }
