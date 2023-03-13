@@ -67,7 +67,7 @@ impl sys::File for Handle {
         let raw_fd = ops
             .custom_flags(FILE_FLAG_OVERLAPPED)
             .open(path.into())?
-            .into_raw_handle();
+            .into_raw_handle() as *mut winapi::ctypes::c_void;
 
         unsafe {
             let completion_port = reactor.io_handle();
@@ -142,7 +142,7 @@ impl ReactorHandle for Handle {
             let mut number_of_bytes_read = 0u32;
             let ret = ReadFile(
                 fd,
-                buffer.as_mut_ptr() as *mut c_void,
+                buffer.as_mut_ptr() as *mut winapi::ctypes::c_void,
                 buffer.len() as u32,
                 &mut number_of_bytes_read as *mut u32,
                 overlapped as *mut OVERLAPPED,
@@ -198,7 +198,7 @@ impl ReactorHandle for Handle {
             let mut number_of_bytes_written = 0u32;
             let ret = WriteFile(
                 fd,
-                buffer.as_ptr() as *mut c_void,
+                buffer.as_ptr() as *mut winapi::ctypes::c_void,
                 buffer.len() as u32,
                 &mut number_of_bytes_written as *mut u32,
                 overlapped as *mut OVERLAPPED,
@@ -238,7 +238,7 @@ impl ReactorHandleSeekable for Handle {
         let fd = self.to_raw_fd();
 
         unsafe {
-            let mut file = std::fs::File::from_raw_handle(fd);
+            let mut file = std::fs::File::from_raw_handle(fd as *mut c_void);
 
             let offset = file.seek(pos)?;
 

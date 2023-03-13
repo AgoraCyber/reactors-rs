@@ -15,6 +15,15 @@ pub struct SysPoller {
     handle: i32,
 }
 
+impl Drop for SysPoller {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.handle) == 1 {
+            log::debug!("Close iocp handle({:?})", *self.handle);
+            unsafe { close(*self.handle) };
+        }
+    }
+}
+
 impl SysPoller {
     pub fn new() -> Result<Self> {
         let handle = unsafe { libc::epoll_create(1) };

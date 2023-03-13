@@ -236,7 +236,10 @@ impl Stream for TcpAcceptor {
                     remote.expect("Underlay accept returns success, but not set remote address"),
                 ))));
             }
-            Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err))),
+            Poll::Ready(Err(err)) => {
+                log::debug!("===================== {:?}", err);
+                return Poll::Ready(Some(Err(err)));
+            }
         }
     }
 }
@@ -355,14 +358,25 @@ mod tests {
         let mut acceptor = TcpAcceptor::new(
             acceptor_reactor.clone(),
             listen_addr,
+            // None,
             Some(connection_reactor.clone()),
         )
         .unwrap();
 
         let connect = TcpStream::connect(connection_reactor.clone(), listen_addr, None, None);
 
+        spawn(move || loop {
+            connection_reactor
+                .poll_once(Duration::from_millis(300))
+                .unwrap();
+
+            acceptor_reactor
+                .poll_once(Duration::from_millis(300))
+                .unwrap();
+        });
+
         pool.spawn(async move {
-            while let Some((conn, remote)) = acceptor.try_next().await.unwrap() {
+            while let Some((conn, remote)) = acceptor.try_next().await.unwrap_or(None) {
                 log::info!("accept remote {}", remote);
 
                 let mut read_stream = conn.to_read_stream(None);
@@ -378,16 +392,6 @@ mod tests {
             }
         })
         .unwrap();
-
-        spawn(move || loop {
-            connection_reactor
-                .poll_once(Duration::from_millis(300))
-                .unwrap();
-
-            acceptor_reactor
-                .poll_once(Duration::from_millis(300))
-                .unwrap();
-        });
 
         let connection = connect.await.unwrap();
 

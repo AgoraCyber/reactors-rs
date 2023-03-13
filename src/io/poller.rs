@@ -41,6 +41,11 @@ pub type EventMessage = ();
 #[derive(Debug, PartialEq, Hash, Eq, Clone)]
 pub struct Key(RawFd, EventName);
 
+#[cfg(target_family = "windows")]
+unsafe impl Send for Key {}
+#[cfg(target_family = "windows")]
+unsafe impl Sync for Key {}
+
 /// [`SysPoller`] event type.
 #[derive(Debug)]
 pub struct Event {

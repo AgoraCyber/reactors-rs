@@ -116,8 +116,11 @@ fn bench_reactors(c: &mut Criterion) {
 
     let client_reactor = IoReactor::default();
 
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
     c.bench_function("echo reactors", |b| {
-        b.iter(|| reactor_client(client_reactor.clone()))
+        b.to_async(&rt)
+            .iter(|| reactor_client(client_reactor.clone()))
     });
 }
 

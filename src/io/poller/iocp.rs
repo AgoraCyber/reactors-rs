@@ -3,7 +3,7 @@ use std::{
     mem::size_of,
     net::SocketAddr,
     ptr::null_mut,
-    sync::Once,
+    sync::{Arc, Once},
     time::{Duration, SystemTime},
 };
 
@@ -37,6 +37,9 @@ pub enum EventMessage {
     Write(usize),
     SendTo(usize),
 }
+
+unsafe impl Send for EventMessage {}
+unsafe impl Sync for EventMessage {}
 
 /// Overlapped structure used by IOCP system.
 #[repr(C)]
@@ -89,8 +92,20 @@ impl From<*mut ReactorOverlapped> for Box<ReactorOverlapped> {
 ///
 #[derive(Clone, Debug)]
 pub struct SysPoller {
-    iocp: HANDLE,
+    iocp: Arc<HANDLE>,
 }
+
+impl Drop for SysPoller {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.iocp) == 1 {
+            log::debug!("Close iocp handle({:?})", self.io_handle());
+            unsafe { CloseHandle(*self.iocp) };
+        }
+    }
+}
+
+unsafe impl Send for SysPoller {}
+unsafe impl Sync for SysPoller {}
 
 impl SysPoller {
     pub fn new() -> Result<Self> {
@@ -114,10 +129,12 @@ impl SysPoller {
             return Err(Error::last_os_error());
         }
 
-        Ok(Self { iocp: handle })
+        Ok(Self {
+            iocp: Arc::new(handle),
+        })
     }
     pub fn io_handle(&self) -> super::RawFd {
-        self.iocp
+        *self.iocp
     }
 
     pub fn poll_once(&self, keys: &[Key], timeout: Duration) -> Result<Vec<Event>> {

@@ -131,6 +131,7 @@ impl sys::Socket for Handle {
     }
 
     fn close(&mut self) {
+        log::debug!("close socket({:?})", self.to_raw_fd());
         unsafe {
             closesocket(*self.fd);
         }
@@ -304,6 +305,8 @@ impl Handle {
     ) -> std::task::Poll<Result<usize>> {
         let fd = self.to_raw_fd();
 
+        log::debug!("poll_accept({:?})", fd);
+
         if let Some(event) = self.reactor.poll_io_event(fd, EventName::Accept)? {
             match event.message? {
                 EventMessage::Accept(fd, addr) => {
@@ -318,6 +321,8 @@ impl Handle {
             }
         }
 
+        log::debug!("poll_accept({:?}) poll_io_event", fd);
+
         let accept_socket = Self::tcp(self.ip_v4)?;
 
         let overlapped = ReactorOverlapped::new_raw(fd, EventName::Accept);
@@ -330,7 +335,7 @@ impl Handle {
             let ret = AcceptEx(
                 fd as usize,
                 accept_socket as usize,
-                (*overlapped).addrs.as_mut_ptr() as *mut c_void,
+                (*overlapped).addrs.as_mut_ptr() as *mut winapi::ctypes::c_void,
                 0,
                 (*overlapped).addr_len as u32,
                 (*overlapped).addr_len as u32,
@@ -353,22 +358,26 @@ impl Handle {
                 *conn_fd = Some(accept_socket);
 
                 return Poll::Ready(Ok(0));
+            } else {
+                let e = WSAGetLastError();
+
+                // This operation will completing Asynchronously
+                if e == ERROR_IO_PENDING as i32 {
+                    log::trace!("socket({:?}) accept asynchronously", fd);
+
+                    self.reactor
+                        .once(fd, EventName::Accept, cx.waker().clone(), timeout);
+
+                    return Poll::Pending;
+                }
+
+                log::error!("WSA error {}", e);
+
+                // Release overlapped
+                let _: Box<ReactorOverlapped> = overlapped.into();
+
+                return Poll::Ready(Err(Error::last_os_error()));
             }
-
-            // This operation will completing Asynchronously
-            if GetLastError() == ERROR_IO_PENDING {
-                log::trace!("socket({:?}) accept asynchronously", fd);
-
-                self.reactor
-                    .once(fd, EventName::Accept, cx.waker().clone(), timeout);
-
-                return Poll::Pending;
-            }
-
-            // Release overlapped
-            let _: Box<ReactorOverlapped> = overlapped.into();
-
-            return Poll::Ready(Err(Error::last_os_error()));
         }
     }
 
