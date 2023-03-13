@@ -41,6 +41,7 @@ impl Drop for Handle {
 impl Handle {
     fn close(&mut self) {
         unsafe {
+            #[cfg(not(target_os = "linux"))]
             self.reactor.on_close_fd(*self.fd);
             close(*self.fd);
         }
@@ -52,6 +53,7 @@ impl Handle {
 }
 
 impl sys::File for Handle {
+    #[allow(unused_mut)]
     fn new<P: Into<std::path::PathBuf>>(
         mut reactor: IoReactor,
         path: P,
@@ -68,6 +70,7 @@ impl sys::File for Handle {
                 }
             }
 
+            #[cfg(not(target_os = "linux"))]
             match reactor.on_open_fd(raw_fd) {
                 Err(err) => {
                     close(raw_fd);

@@ -108,7 +108,7 @@ fn bench_reactors(c: &mut Criterion) {
 
     spawn(move || loop {
         server_background_reactor
-            .poll_once(Duration::from_millis(500))
+            .poll_once(Duration::from_millis(10000))
             .unwrap();
     });
 
