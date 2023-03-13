@@ -12,16 +12,16 @@ use super::sys::{self, Socket};
 use super::Handle;
 
 /// Tcp connection socket facade.
-pub struct TcpConnection(Handle);
+pub struct TcpStream(Handle);
 
 /// Convert tcp connection from [`Handle`]
-impl From<Handle> for TcpConnection {
+impl From<Handle> for TcpStream {
     fn from(value: Handle) -> Self {
         Self(value)
     }
 }
 
-impl TcpConnection {
+impl TcpStream {
     /// Create new tcp client socket and return [`TcpConnect`] future.
     pub fn connect(
         reactor: IoReactor,
@@ -71,16 +71,16 @@ impl TcpConnection {
     }
 
     /// Convert tcp connection to read stream
-    pub fn to_read_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> TcpConnectionReader {
-        TcpConnectionReader {
+    pub fn to_read_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> TcpStreamReader {
+        TcpStreamReader {
             handle: self.0.clone(),
             timeout: timeout.into(),
         }
     }
 
     /// Convert tcp connection to write stream.
-    pub fn to_write_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> TcpConnectionWriter {
-        TcpConnectionWriter {
+    pub fn to_write_stream<T: Into<Option<Duration>>>(&self, timeout: T) -> TcpStreamWriter {
+        TcpStreamWriter {
             handle: self.0.clone(),
             timeout: timeout.into(),
         }
@@ -97,7 +97,7 @@ pub struct TcpConnect {
 }
 
 impl Future for TcpConnect {
-    type Output = Result<TcpConnection>;
+    type Output = Result<TcpStream>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -117,7 +117,7 @@ impl Future for TcpConnect {
                 self.handle = Some(handle);
                 return Poll::Pending;
             }
-            Poll::Ready(Ok(_)) => return Poll::Ready(Ok(TcpConnection(handle))),
+            Poll::Ready(Ok(_)) => return Poll::Ready(Ok(TcpStream(handle))),
             Poll::Ready(Err(err)) => {
                 self.handle = Some(handle);
 
@@ -128,12 +128,12 @@ impl Future for TcpConnect {
 }
 
 /// Tcp connection read stream.
-pub struct TcpConnectionReader {
+pub struct TcpStreamReader {
     handle: Handle,
     timeout: Option<Duration>,
 }
 
-impl AsyncRead for TcpConnectionReader {
+impl AsyncRead for TcpStreamReader {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -145,13 +145,13 @@ impl AsyncRead for TcpConnectionReader {
     }
 }
 
-/// TcpConnection write stream
-pub struct TcpConnectionWriter {
+/// TcpStream write stream
+pub struct TcpStreamWriter {
     handle: Handle,
     timeout: Option<Duration>,
 }
 
-impl AsyncWrite for TcpConnectionWriter {
+impl AsyncWrite for TcpStreamWriter {
     fn poll_close(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -203,7 +203,7 @@ impl TcpAcceptor {
 }
 
 impl Stream for TcpAcceptor {
-    type Item = Result<(TcpConnection, SocketAddr)>;
+    type Item = Result<(TcpStream, SocketAddr)>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -232,7 +232,7 @@ impl Stream for TcpAcceptor {
                 };
 
                 return Poll::Ready(Some(Ok((
-                    TcpConnection::from(Handle::new(self.0.ip_v4, handle, reactor)?),
+                    TcpStream::from(Handle::new(self.0.ip_v4, handle, reactor)?),
                     remote.expect("Underlay accept returns success, but not set remote address"),
                 ))));
             }
@@ -269,9 +269,9 @@ mod tests {
 
         // assert_stream_pending!(acceptor);
 
-        let mut connect = TcpConnection::connect(reactor.clone(), listen_addr, None, None);
+        let mut connect = TcpStream::connect(reactor.clone(), listen_addr, None, None);
 
-        let client_connection: TcpConnection;
+        let client_connection: TcpStream;
 
         // try connect
         loop {
@@ -288,7 +288,7 @@ mod tests {
 
         let mut try_next = acceptor.try_next();
 
-        let server_connection: TcpConnection;
+        let server_connection: TcpStream;
 
         // Accept one
         loop {
@@ -359,7 +359,7 @@ mod tests {
         )
         .unwrap();
 
-        let connect = TcpConnection::connect(connection_reactor.clone(), listen_addr, None, None);
+        let connect = TcpStream::connect(connection_reactor.clone(), listen_addr, None, None);
 
         pool.spawn(async move {
             while let Some((conn, remote)) = acceptor.try_next().await.unwrap() {

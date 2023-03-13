@@ -1,3 +1,5 @@
+//! File with asynchronous io support
+
 use std::{fs::OpenOptions, io::Result, pin::Pin, task::Poll, time::Duration};
 
 use futures::{AsyncRead, AsyncSeek, AsyncWrite};
@@ -11,6 +13,7 @@ use super::Handle;
 pub struct File(Handle);
 
 impl File {
+    /// Create new file with asynchronous read/write suppport, if the file exists, truncate it.
     pub fn create<PB: Into<PathBuf>>(poller: IoReactor, path: PB) -> Result<Self> {
         use super::sys::File;
 
@@ -26,6 +29,7 @@ impl File {
         .map(|h| Self(h))
     }
 
+    /// Open exists file with asynchronous read/write suppport.
     pub fn open<PB: Into<PathBuf>>(poller: IoReactor, path: PB) -> Result<Self> {
         use super::sys::File;
 
@@ -48,6 +52,7 @@ impl File {
     }
 }
 
+/// File reader stream with operator timeout support
 pub struct FileReader(Handle, Option<Duration>);
 
 impl AsyncRead for FileReader {
@@ -73,6 +78,7 @@ impl AsyncSeek for FileReader {
     }
 }
 
+/// File writer stream with operator timeout support.
 pub struct FileWriter(Handle, Option<Duration>);
 
 impl AsyncWrite for FileWriter {

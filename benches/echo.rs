@@ -79,9 +79,9 @@ async fn setup_reactors_server(reactor: reactors::io::IoReactor) -> anyhow::Resu
 
 async fn reactor_client(reactor: reactors::io::IoReactor) -> anyhow::Result<()> {
     use futures::{AsyncReadExt, AsyncWriteExt};
-    use reactors::io::socket::tcp::TcpConnection;
+    use reactors::io::socket::tcp::TcpStream;
 
-    let conn = TcpConnection::connect(reactor, "127.0.0.1:1813".parse()?, None, None).await?;
+    let conn = TcpStream::connect(reactor, "127.0.0.1:1813".parse()?, None, None).await?;
 
     let mut reader = conn.to_read_stream(None);
     let mut writer = conn.to_write_stream(None);
