@@ -261,7 +261,7 @@ mod tests {
 
         let mut reactor = IoReactor::default();
 
-        let listen_addr = "127.0.0.1:1812".parse().unwrap();
+        let listen_addr = "127.0.0.1:1801".parse().unwrap();
 
         let mut acceptor = TcpAcceptor::new(reactor.clone(), listen_addr, None).unwrap();
 
@@ -349,7 +349,7 @@ mod tests {
 
         let mut connection_reactor = IoReactor::default();
 
-        let listen_addr = "127.0.0.1:1812".parse().unwrap();
+        let listen_addr = "127.0.0.1:1802".parse().unwrap();
 
         // Accept connection with seperate incoming connection reactor.
         let mut acceptor = TcpAcceptor::new(
