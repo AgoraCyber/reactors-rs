@@ -12,7 +12,7 @@
 
 **reactors** does not limit the thread model it uses. In particular, we can create multiple IoReactor objects to share the IO load
 
-```rust
+```rust no_run
 use reactors::io::*;
 use reactors::io::socket::tcp::TcpAcceptor;
 use reactors::io::IoReactor;
