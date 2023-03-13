@@ -61,9 +61,8 @@ async fn setup_reactors_server(reactor: reactors::io::IoReactor) -> anyhow::Resu
 
     let mut acceptor = TcpAcceptor::new(reactor, "127.0.0.1:1813".parse()?, None)?;
 
-    log::debug!("setup_reactors_server");
-
-    while let Some((conn, _)) = acceptor.try_next().await? {
+    while let Some((conn, remote)) = acceptor.try_next().await? {
+        log::debug!("accept {}", remote);
         let mut reader = conn.to_read_stream(None);
         let mut writer = conn.to_write_stream(None);
 
@@ -109,7 +108,7 @@ fn bench_reactors(c: &mut Criterion) {
 
     spawn(move || loop {
         server_background_reactor
-            .poll_once(Duration::from_millis(200))
+            .poll_once(Duration::from_millis(500))
             .unwrap();
     });
 

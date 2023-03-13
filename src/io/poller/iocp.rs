@@ -168,14 +168,13 @@ impl SysPoller {
                 );
 
                 if ret > 0 {
-                    log::debug!("iocp status({})", removed);
-
                     let overlappeds = overlapped_entries[..removed as usize]
                         .into_iter()
                         .map(|o| Box::from_raw((*o).lpOverlapped as *mut ReactorOverlapped))
                         .collect::<Vec<_>>();
 
                     for o in overlappeds {
+                        log::debug!("iocp file({:?}) raised({:?})", o.fd, o.event_name,);
                         match o.event_name {
                             EventName::Accept => {
                                 log::debug!(

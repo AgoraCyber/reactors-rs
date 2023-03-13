@@ -375,7 +375,7 @@ mod tests {
                 .unwrap();
         });
 
-        pool.spawn(async move {
+        _ = pool.spawn(async move {
             while let Some((conn, remote)) = acceptor.try_next().await.unwrap_or(None) {
                 log::info!("accept remote {}", remote);
 
@@ -390,10 +390,11 @@ mod tests {
 
                 write_stream.write_all(&buff).await.unwrap();
             }
-        })
-        .unwrap();
+        });
 
         let connection = connect.await.unwrap();
+
+        log::debug!("Connected({:?})", connection.0.to_raw_fd());
 
         let mut write_stream = connection.to_write_stream(None);
         let mut read_stream = connection.to_read_stream(None);

@@ -184,11 +184,11 @@ impl IoReactor {
         waker: Waker,
         timeout: Option<Duration>,
     ) {
-        log::debug!("register event({:?})", name);
+        log::debug!("fd({:?}) register event({:?})", fd, name);
 
         let mut event_loop = self.event_loop.lock().unwrap();
 
-        let key = Key(fd, name);
+        let key = Key(fd, name.clone());
 
         event_loop.sending.insert(key.clone(), waker);
 
@@ -197,6 +197,14 @@ impl IoReactor {
 
             event_loop.time_wheel.add(timeout, key);
         }
+    }
+
+    pub fn remove_once(&mut self, fd: super::RawFd, name: EventName) {
+        let mut event_loop = self.event_loop.lock().unwrap();
+
+        let key = Key(fd, name.clone());
+
+        event_loop.sending.remove(&key);
     }
 
     pub fn poll_io_event(&mut self, fd: super::RawFd, name: EventName) -> Result<Option<Event>> {
@@ -221,6 +229,7 @@ impl Reactor for IoReactor {
         };
 
         let events = if !event_keys.is_empty() {
+            log::debug!("poll event keys({:?})", event_keys);
             self.poller.poll_once(&event_keys, duration)?
         } else {
             vec![]
@@ -232,6 +241,7 @@ impl Reactor for IoReactor {
 
             for event in events {
                 if let Some(waker) = event_loop.sending.remove(event.key()) {
+                    log::debug!("wakeup {:?}", event.key);
                     wakers.push(waker);
 
                     event_loop.received.insert(event.key().clone(), event);

@@ -42,7 +42,7 @@ pub struct Handle {
 }
 
 impl Handle {
-    fn to_raw_fd(&self) -> RawFd {
+    pub fn to_raw_fd(&self) -> RawFd {
         *self.fd as RawFd
     }
 }
@@ -329,6 +329,9 @@ impl Handle {
 
         let mut bytes_received = 0u32;
 
+        self.reactor
+            .once(fd, EventName::Accept, cx.waker().clone(), timeout);
+
         unsafe {
             (*overlapped).accept_fd = accept_socket;
 
@@ -347,17 +350,19 @@ impl Handle {
 
             if ret > 0 {
                 // obtain point ownership
-                let overlapped: Box<ReactorOverlapped> = overlapped.into();
+                // let overlapped: Box<ReactorOverlapped> = overlapped.into();
 
-                let remote_addr = OsSocketAddr::copy_from_raw(
-                    overlapped.addrs[16..].as_ptr() as *const SOCKADDR,
-                    16,
-                );
+                // let remote_addr = OsSocketAddr::copy_from_raw(
+                //     overlapped.addrs[16..].as_ptr() as *const SOCKADDR,
+                //     16,
+                // );
 
-                *remote = remote_addr.into();
-                *conn_fd = Some(accept_socket);
+                // *remote = remote_addr.into();
+                // *conn_fd = Some(accept_socket);
 
-                return Poll::Ready(Ok(0));
+                // return Poll::Ready(Ok(0));
+
+                return Poll::Pending;
             } else {
                 let e = WSAGetLastError();
 
@@ -365,13 +370,12 @@ impl Handle {
                 if e == ERROR_IO_PENDING as i32 {
                     log::trace!("socket({:?}) accept asynchronously", fd);
 
-                    self.reactor
-                        .once(fd, EventName::Accept, cx.waker().clone(), timeout);
-
                     return Poll::Pending;
                 }
 
                 log::error!("WSA error {}", e);
+
+                self.reactor.remove_once(fd, EventName::Accept);
 
                 // Release overlapped
                 let _: Box<ReactorOverlapped> = overlapped.into();
@@ -405,6 +409,9 @@ impl Handle {
 
         let overlapped = ReactorOverlapped::new_raw(fd, EventName::RecvFrom);
 
+        self.reactor
+            .once(fd, EventName::RecvFrom, cx.waker().clone(), timeout);
+
         unsafe {
             (*overlapped).buff[0].buf = buff.as_mut_ptr() as *mut i8;
 
@@ -428,25 +435,15 @@ impl Handle {
 
             //  operation has completed immediately
             if ret == 0 {
-                let overlapped: Box<ReactorOverlapped> = overlapped.into();
-
-                let addr = OsSocketAddr::copy_from_raw(
-                    overlapped.addrs[..overlapped.addr_len as usize].as_ptr() as *mut SOCKADDR,
-                    overlapped.addr_len,
-                );
-
-                *remote = addr.into();
-
-                return Poll::Ready(Ok(bytes_received as usize));
+                return Poll::Pending;
             } else {
                 let e = WSAGetLastError();
 
                 if WSA_IO_PENDING == e {
-                    self.reactor
-                        .once(fd, EventName::RecvFrom, cx.waker().clone(), timeout);
-
                     return Poll::Pending;
                 }
+
+                self.reactor.remove_once(fd, EventName::RecvFrom);
 
                 // Release overlapped
                 let _: Box<ReactorOverlapped> = overlapped.into();
@@ -481,6 +478,9 @@ impl Handle {
 
         let mut flag = 0u32;
 
+        self.reactor
+            .once(fd, EventName::Read, cx.waker().clone(), timeout);
+
         unsafe {
             (*overlapped).buff[0].buf = buff.as_ptr() as *mut i8;
 
@@ -502,18 +502,15 @@ impl Handle {
 
             //  operation has completed immediately
             if ret == 0 {
-                let _: Box<ReactorOverlapped> = overlapped.into();
-
-                return Poll::Ready(Ok(bytes_received as usize));
+                return Poll::Pending;
             } else {
                 let e = WSAGetLastError();
 
                 if WSA_IO_PENDING == e {
-                    self.reactor
-                        .once(fd, EventName::Read, cx.waker().clone(), timeout);
-
                     return Poll::Pending;
                 }
+
+                self.reactor.remove_once(fd, EventName::Read);
 
                 // Release overlapped
                 let _: Box<ReactorOverlapped> = overlapped.into();
@@ -554,6 +551,9 @@ impl Handle {
 
             let mut bytes_received = 0u32;
 
+            self.reactor
+                .once(fd, EventName::SendTo, cx.waker().clone(), timeout);
+
             let ret = WSASendTo(
                 fd as usize,
                 (*overlapped).buff.as_mut_ptr() as *mut WSABUF,
@@ -568,18 +568,15 @@ impl Handle {
 
             //  operation has completed immediately
             if ret == 0 {
-                let _: Box<ReactorOverlapped> = overlapped.into();
-
-                return Poll::Ready(Ok(bytes_received as usize));
+                return Poll::Pending;
             } else {
                 let e = WSAGetLastError();
 
                 if WSA_IO_PENDING == e {
-                    self.reactor
-                        .once(fd, EventName::SendTo, cx.waker().clone(), timeout);
-
                     return Poll::Pending;
                 }
+
+                self.reactor.remove_once(fd, EventName::SendTo);
 
                 // Release overlapped
                 let _: Box<ReactorOverlapped> = overlapped.into();
@@ -619,6 +616,9 @@ impl Handle {
 
             let mut bytes_received = 0u32;
 
+            self.reactor
+                .once(fd, EventName::Write, cx.waker().clone(), timeout);
+
             let ret = WSASend(
                 fd as usize,
                 (*overlapped).buff.as_mut_ptr() as *mut WSABUF,
@@ -633,18 +633,15 @@ impl Handle {
 
             //  operation has completed immediately
             if ret == 0 {
-                let _: Box<ReactorOverlapped> = overlapped.into();
-
-                return Poll::Ready(Ok(bytes_received as usize));
+                return Poll::Pending;
             } else {
                 let e = WSAGetLastError();
 
                 if WSA_IO_PENDING == e {
-                    self.reactor
-                        .once(fd, EventName::SendTo, cx.waker().clone(), timeout);
-
                     return Poll::Pending;
                 }
+
+                self.reactor.remove_once(fd, EventName::Write);
 
                 // Release overlapped
                 let _: Box<ReactorOverlapped> = overlapped.into();
