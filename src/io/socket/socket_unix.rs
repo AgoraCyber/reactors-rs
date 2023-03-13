@@ -90,7 +90,13 @@ impl sys::Socket for Handle {
     }
 
     fn new(ip_v4: bool, fd: RawFd, mut reactor: IoReactor) -> Result<Self> {
-        reactor.on_open_fd(fd)?;
+        match reactor.on_open_fd(fd) {
+            Err(err) => {
+                unsafe { close(fd) };
+                return Err(err);
+            }
+            _ => {}
+        }
 
         Ok(Self {
             reactor,

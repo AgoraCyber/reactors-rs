@@ -68,7 +68,13 @@ impl sys::File for Handle {
                 }
             }
 
-            reactor.on_open_fd(raw_fd)?;
+            match reactor.on_open_fd(raw_fd) {
+                Err(err) => {
+                    close(raw_fd);
+                    return Err(err);
+                }
+                _ => {}
+            }
         }
 
         let handle = Handle {

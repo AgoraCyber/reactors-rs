@@ -267,7 +267,7 @@ impl Reactor for IoReactor {
     }
 }
 
-#[cfg(all(test, target_family = "unix"))]
+#[cfg(all(test, target_family = "macos"))]
 mod tests {
     use futures::task::noop_waker;
 
