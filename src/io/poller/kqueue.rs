@@ -32,8 +32,12 @@ impl SysPoller {
             handle: Arc::new(kq_handle),
         })
     }
-    pub fn io_handle(&self) -> super::RawFd {
-        *self.handle
+    pub fn on_open_fd(&self, fd: RawFd) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn on_close_fd(&self, fd: RawFd) -> Result<()> {
+        Ok(())
     }
 
     pub fn poll_once(&self, keys: &[Key], timeout: Duration) -> Result<Vec<Event>> {
