@@ -157,7 +157,9 @@ impl IoReactor {
             tick_duration,
         })
     }
-    pub fn cancel_all(&mut self, fd: super::RawFd) {
+    pub fn on_close_fd(&mut self, fd: super::RawFd) {
+        _ = self.poller.on_close_fd(fd);
+
         let mut event_loop = self.event_loop.lock().unwrap();
 
         let mut keys = vec![];
@@ -173,8 +175,8 @@ impl IoReactor {
         }
     }
 
-    pub fn io_handle(&self) -> super::RawFd {
-        self.poller.io_handle()
+    pub fn on_open_fd(&mut self, fd: super::RawFd) -> Result<()> {
+        self.poller.on_open_fd(fd)
     }
 
     pub fn once(

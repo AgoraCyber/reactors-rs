@@ -1,9 +1,12 @@
 use std::{
+    collections::HashMap,
     io::{Error, Result},
+    ptr::null_mut,
+    sync::Arc,
     time::Duration,
 };
 
-use super::{Event, EventName, Key};
+use super::{Event, EventName, Key, RawFd};
 
 use errno::{errno, set_errno};
 use libc::*;
@@ -12,7 +15,7 @@ use libc::*;
 ///
 #[derive(Clone, Debug)]
 pub struct SysPoller {
-    handle: i32,
+    handle: Arc<i32>,
 }
 
 impl Drop for SysPoller {
@@ -32,36 +35,76 @@ impl SysPoller {
             return Err(Error::last_os_error());
         }
 
-        Ok(Self { handle })
+        Ok(Self {
+            handle: Arc::new(handle),
+        })
     }
-    pub fn io_handle(&self) -> super::RawFd {
-        self.handle
+    pub fn on_open_fd(&self, fd: RawFd) -> Result<()> {
+        let event = epoll_event {
+            events: (EPOLLIN | EPOLLOUT | EPOLLET) as u32,
+            u64: fd as u64,
+        };
+
+        let ret = unsafe {
+            epoll_ctl(
+                *self.handle,
+                EPOLL_CTL_ADD,
+                fd,
+                [event].as_ptr() as *mut epoll_event,
+            )
+        };
+
+        if ret == -1 {
+            return Err(Error::last_os_error());
+        }
+
+        return Ok(());
+    }
+
+    pub fn on_close_fd(&self, fd: RawFd) -> Result<()> {
+        let ret = unsafe { epoll_ctl(*self.handle, EPOLL_CTL_DEL, fd, null_mut()) };
+
+        if ret == -1 {
+            return Err(Error::last_os_error());
+        }
+
+        return Ok(());
     }
 
     pub fn poll_once(&self, keys: &[Key], timeout: Duration) -> Result<Vec<Event>> {
+        let mut fds = HashMap::new();
+
         for key in keys {
-            let event = match key.1 {
-                EventName::Read => epoll_event {
-                    events: EPOLLIN as u32,
-                    u64: key.0 as u64,
-                },
-                EventName::Write => epoll_event {
-                    events: EPOLLOUT as u32,
-                    u64: key.0 as u64,
-                },
+            match key.1 {
+                EventName::Read => {
+                    fds.entry(key.0)
+                        .and_modify(|c| *c = *c | EPOLLIN)
+                        .or_insert(EPOLLIN);
+                }
+                EventName::Write => {
+                    fds.entry(key.0)
+                        .and_modify(|c| *c = *c | EPOLLOUT)
+                        .or_insert(EPOLLOUT);
+                }
+            }
+        }
+
+        for (fd, ops) in fds {
+            let event = epoll_event {
+                events: ops as u32,
+                u64: fd as u64,
             };
 
             let ret = unsafe {
                 epoll_ctl(
-                    self.handle,
-                    EPOLL_CTL_ADD,
-                    key.0,
+                    *self.handle,
+                    EPOLL_CTL_MOD,
+                    fd,
                     [event].as_ptr() as *mut epoll_event,
                 )
             };
 
             if ret == -1 {
-                log::debug!("1");
                 return Err(Error::last_os_error());
             }
         }
@@ -70,7 +113,7 @@ impl SysPoller {
 
         let fired = unsafe {
             epoll_wait(
-                self.handle,
+                *self.handle,
                 fired_events.as_ptr() as *mut epoll_event,
                 fired_events.len() as i32,
                 timeout.as_millis() as i32,
@@ -101,7 +144,7 @@ impl SysPoller {
 
             if event.events & EPOLLOUT as u32 != 0 {
                 events.push(Event {
-                    key: Key(event.u64 as i32, EventName::Read),
+                    key: Key(event.u64 as i32, EventName::Write),
                     message: Ok(()),
                 })
             }

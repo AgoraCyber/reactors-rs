@@ -352,7 +352,7 @@ mod tests {
 
         let mut connection_reactor = IoReactor::default();
 
-        let listen_addr = "127.0.0.1:1802".parse().unwrap();
+        let listen_addr = "127.0.0.1:1130".parse().unwrap();
 
         // Accept connection with seperate incoming connection reactor.
         let mut acceptor = TcpAcceptor::new(
@@ -367,11 +367,11 @@ mod tests {
 
         spawn(move || loop {
             connection_reactor
-                .poll_once(Duration::from_millis(300))
+                .poll_once(Duration::from_millis(1000))
                 .unwrap();
 
             acceptor_reactor
-                .poll_once(Duration::from_millis(300))
+                .poll_once(Duration::from_millis(1000))
                 .unwrap();
         });
 

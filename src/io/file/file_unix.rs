@@ -41,7 +41,7 @@ impl Drop for Handle {
 impl Handle {
     fn close(&mut self) {
         unsafe {
-            self.reactor.cancel_all(*self.fd);
+            self.reactor.on_close_fd(*self.fd);
             close(*self.fd);
         }
     }
@@ -53,7 +53,7 @@ impl Handle {
 
 impl sys::File for Handle {
     fn new<P: Into<std::path::PathBuf>>(
-        reactor: IoReactor,
+        mut reactor: IoReactor,
         path: P,
         ops: &mut std::fs::OpenOptions,
     ) -> std::io::Result<Self> {
@@ -67,6 +67,8 @@ impl sys::File for Handle {
                     return Err(err);
                 }
             }
+
+            reactor.on_open_fd(raw_fd)?;
         }
 
         let handle = Handle {

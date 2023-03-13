@@ -37,7 +37,7 @@ pub struct Handle {
 }
 
 impl Handle {
-    fn to_raw_fd(&self) -> RawFd {
+    pub fn to_raw_fd(&self) -> RawFd {
         *self.fd as RawFd
     }
 }
@@ -89,7 +89,9 @@ impl sys::Socket for Handle {
         }
     }
 
-    fn new(ip_v4: bool, fd: RawFd, reactor: IoReactor) -> Result<Self> {
+    fn new(ip_v4: bool, fd: RawFd, mut reactor: IoReactor) -> Result<Self> {
+        reactor.on_open_fd(fd)?;
+
         Ok(Self {
             reactor,
             fd: Arc::new(fd),
@@ -119,7 +121,7 @@ impl sys::Socket for Handle {
 
     fn close(&mut self) {
         log::trace!("close fd({})", *self.fd);
-        self.reactor.cancel_all(*self.fd);
+        self.reactor.on_close_fd(*self.fd);
 
         unsafe {
             close(*self.fd);
