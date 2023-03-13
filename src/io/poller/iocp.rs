@@ -319,6 +319,10 @@ impl SysPoller {
                 }
             }
 
+            if !events.is_empty() {
+                break;
+            }
+
             if start_time.elapsed().unwrap() > timeout {
                 break;
             }

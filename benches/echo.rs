@@ -99,7 +99,7 @@ async fn reactor_client(reactor: reactors::io::IoReactor) -> anyhow::Result<()> 
 }
 
 fn bench_reactors(c: &mut Criterion) {
-    // pretty_env_logger::init();
+    pretty_env_logger::init();
     use reactors::io::IoReactor;
 
     let reactor = IoReactor::default();
