@@ -99,7 +99,7 @@ async fn reactor_client(reactor: reactors::io::IoReactor) -> anyhow::Result<()> 
 }
 
 fn bench_reactors(c: &mut Criterion) {
-    pretty_env_logger::init();
+    // pretty_env_logger::init();
     use reactors::io::IoReactor;
 
     let reactor = IoReactor::default();
@@ -108,7 +108,7 @@ fn bench_reactors(c: &mut Criterion) {
 
     spawn(move || loop {
         server_background_reactor
-            .poll_once(Duration::from_millis(10000))
+            .poll_once(Duration::from_millis(200))
             .unwrap();
     });
 

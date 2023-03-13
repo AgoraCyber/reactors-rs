@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use super::{Event, EventName, Key};
+use super::{Event, EventName, Key, RawFd};
 use libc::*;
 
 /// Event for iocp system.
@@ -33,40 +33,110 @@ impl SysPoller {
         })
     }
     pub fn on_open_fd(&self, fd: RawFd) -> Result<()> {
+        log::debug!("add to kevent fd({})", fd);
+        let mut evts = [
+            kevent {
+                ident: fd as usize,
+                filter: EVFILT_WRITE,
+                flags: EV_ADD,
+                fflags: 0,
+                data: 0,
+                udata: null_mut(),
+            },
+            kevent {
+                ident: fd as usize,
+                filter: EVFILT_READ,
+                flags: EV_ADD,
+                fflags: 0,
+                data: 0,
+                udata: null_mut(),
+            },
+        ];
+
+        let ret = unsafe {
+            kevent(
+                *self.handle,
+                evts.as_mut_ptr(),
+                2,
+                null_mut(),
+                0,
+                null_mut(),
+            )
+        };
+
+        if ret < 0 {
+            return Err(Error::last_os_error());
+        }
+
         Ok(())
     }
 
     pub fn on_close_fd(&self, fd: RawFd) -> Result<()> {
+        log::debug!("remove from kevent fd({})", fd);
+        let mut evts = [
+            kevent {
+                ident: fd as usize,
+                filter: EVFILT_WRITE,
+                flags: EV_DELETE,
+                fflags: 0,
+                data: 0,
+                udata: null_mut(),
+            },
+            kevent {
+                ident: fd as usize,
+                filter: EVFILT_READ,
+                flags: EV_DELETE,
+                fflags: 0,
+                data: 0,
+                udata: null_mut(),
+            },
+        ];
+
+        let ret = unsafe {
+            kevent(
+                *self.handle,
+                evts.as_mut_ptr(),
+                2,
+                null_mut(),
+                0,
+                null_mut(),
+            )
+        };
+
+        if ret < 0 {
+            return Err(Error::last_os_error());
+        }
+
         Ok(())
     }
 
     pub fn poll_once(&self, keys: &[Key], timeout: Duration) -> Result<Vec<Event>> {
-        let mut changes = Vec::<kevent>::with_capacity(keys.len());
+        // let mut changes = Vec::<kevent>::with_capacity(keys.len());
 
         use libc::*;
 
-        for key in keys {
-            let k_event = match key.1 {
-                EventName::Read => kevent {
-                    ident: key.0 as usize,
-                    filter: EVFILT_READ,
-                    flags: EV_ADD | EV_ONESHOT | EV_ENABLE,
-                    fflags: 0,
-                    data: 0,
-                    udata: null_mut(),
-                },
-                EventName::Write => kevent {
-                    ident: key.0 as usize,
-                    filter: EVFILT_WRITE,
-                    flags: EV_ADD | EV_ONESHOT | EV_ENABLE,
-                    fflags: 0,
-                    data: 0,
-                    udata: null_mut(),
-                },
-            };
+        // for key in keys {
+        //     let k_event = match key.1 {
+        //         EventName::Read => kevent {
+        //             ident: key.0 as usize,
+        //             filter: EVFILT_READ,
+        //             flags: EV_ADD | EV_ONESHOT | EV_ENABLE,
+        //             fflags: 0,
+        //             data: 0,
+        //             udata: null_mut(),
+        //         },
+        //         EventName::Write => kevent {
+        //             ident: key.0 as usize,
+        //             filter: EVFILT_WRITE,
+        //             flags: EV_ADD | EV_ONESHOT | EV_ENABLE,
+        //             fflags: 0,
+        //             data: 0,
+        //             udata: null_mut(),
+        //         },
+        //     };
 
-            changes.push(k_event);
-        }
+        //     changes.push(k_event);
+        // }
 
         let mut fired_events = vec![unsafe { std::mem::zeroed() }; keys.len()];
 
@@ -78,8 +148,8 @@ impl SysPoller {
         let fired = unsafe {
             libc::kevent(
                 *self.handle,
-                changes.as_mut_ptr(),
-                changes.len() as i32,
+                null_mut(),
+                0,
                 fired_events.as_mut_ptr(),
                 fired_events.len() as i32,
                 &timeout,
@@ -133,6 +203,8 @@ impl SysPoller {
                 }
             }
         }
+
+        log::debug!("raised {:?}", ret);
 
         Ok(ret)
     }

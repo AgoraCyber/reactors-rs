@@ -237,7 +237,6 @@ impl Stream for TcpAcceptor {
                 ))));
             }
             Poll::Ready(Err(err)) => {
-                log::debug!("===================== {:?}", err);
                 return Poll::Ready(Some(Err(err)));
             }
         }
