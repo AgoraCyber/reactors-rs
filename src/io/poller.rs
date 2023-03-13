@@ -184,6 +184,8 @@ impl IoReactor {
         waker: Waker,
         timeout: Option<Duration>,
     ) {
+        log::debug!("register event({:?})", name);
+
         let mut event_loop = self.event_loop.lock().unwrap();
 
         let key = Key(fd, name);

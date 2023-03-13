@@ -8,12 +8,6 @@
 * `macos/ios/freebsd` kqueue backend
 * `windows` iocp backend
 
-## bench
-
-Perhaps **reactors** is much faster than the [`tokio`](https://docs.rs/tokio/1.26.0/tokio/) library 😂 , for the detailed code of the bench test please visit [`echo bench`](benches/echo.rs)
-
-![`bench`](./bench.png)
-
 ## Thread Model
 
 **reactors** does not limit the thread model it uses. In particular, we can create multiple IoReactor objects to share the IO load

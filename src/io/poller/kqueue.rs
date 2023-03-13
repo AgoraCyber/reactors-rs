@@ -1,16 +1,18 @@
 use std::{
     io::{Error, Result},
     ptr::null_mut,
+    sync::Arc,
     time::Duration,
 };
 
 use super::{Event, EventName, Key};
+use libc::*;
 
 /// Event for iocp system.
 ///
 #[derive(Clone, Debug)]
 pub struct SysPoller {
-    handle: i32,
+    handle: Arc<i32>,
 }
 
 impl Drop for SysPoller {
@@ -26,10 +28,12 @@ impl SysPoller {
     pub fn new() -> Result<Self> {
         let kq_handle = unsafe { libc::kqueue() };
 
-        Ok(Self { handle: kq_handle })
+        Ok(Self {
+            handle: Arc::new(kq_handle),
+        })
     }
     pub fn io_handle(&self) -> super::RawFd {
-        self.handle
+        *self.handle
     }
 
     pub fn poll_once(&self, keys: &[Key], timeout: Duration) -> Result<Vec<Event>> {
@@ -69,7 +73,7 @@ impl SysPoller {
 
         let fired = unsafe {
             libc::kevent(
-                self.handle,
+                *self.handle,
                 changes.as_mut_ptr(),
                 changes.len() as i32,
                 fired_events.as_mut_ptr(),

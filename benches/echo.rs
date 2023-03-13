@@ -1,6 +1,6 @@
 use std::{thread::spawn, time::Duration};
 
-use criterion::*;
+use criterion::{async_executor::FuturesExecutor, *};
 use futures::executor::block_on;
 use reactors::Reactor;
 
@@ -61,6 +61,8 @@ async fn setup_reactors_server(reactor: reactors::io::IoReactor) -> anyhow::Resu
 
     let mut acceptor = TcpAcceptor::new(reactor, "127.0.0.1:1813".parse()?, None)?;
 
+    log::debug!("setup_reactors_server");
+
     while let Some((conn, _)) = acceptor.try_next().await? {
         let mut reader = conn.to_read_stream(None);
         let mut writer = conn.to_write_stream(None);
@@ -98,29 +100,28 @@ async fn reactor_client(reactor: reactors::io::IoReactor) -> anyhow::Result<()> 
 }
 
 fn bench_reactors(c: &mut Criterion) {
+    // pretty_env_logger::init();
     use reactors::io::IoReactor;
 
     let reactor = IoReactor::default();
 
-    let mut background = reactor.clone();
+    let mut server_background_reactor = reactor.clone();
 
     spawn(move || loop {
-        background.poll_once(Duration::from_millis(200)).unwrap();
+        server_background_reactor
+            .poll_once(Duration::from_millis(200))
+            .unwrap();
     });
 
-    let server_reactor = IoReactor::default();
+    let server_reactor = reactor.clone();
 
     spawn(move || {
         block_on(setup_reactors_server(server_reactor)).unwrap();
     });
 
-    let client_reactor = IoReactor::default();
-
-    let rt = tokio::runtime::Runtime::new().unwrap();
-
     c.bench_function("echo reactors", |b| {
-        b.to_async(&rt)
-            .iter(|| reactor_client(client_reactor.clone()))
+        b.to_async(FuturesExecutor)
+            .iter(|| reactor_client(reactor.clone()))
     });
 }
 
