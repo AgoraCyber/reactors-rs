@@ -137,6 +137,20 @@ impl SysPoller {
         *self.iocp
     }
 
+    pub fn on_open_fd(&self, fd: RawFd) -> Result<()> {
+        let ret = unsafe { CreateIoCompletionPort(fd, self.io_handle(), 0, 0) };
+
+        if ret == null_mut() {
+            return Err(Error::last_os_error());
+        }
+
+        Ok(())
+    }
+
+    pub fn on_close_fd(&self, _fd: RawFd) -> Result<()> {
+        Ok(())
+    }
+
     pub fn poll_once(&self, keys: &[Key], timeout: Duration) -> Result<Vec<Event>> {
         let start_time = SystemTime::now();
 
