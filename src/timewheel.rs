@@ -1,13 +1,16 @@
+//! Hashed [`timewheel`](https://blog.acolyer.org/2015/11/23/hashed-and-hierarchical-timing-wheels/)
+//! implementation for [`IoReactor`](crate::io::IoReactor)
+
 use std::collections::HashMap;
 use std::task::Poll;
 // Time wheel algorithem impl
-
 #[derive(Debug)]
 struct Slot<T> {
     round: u64,
     t: T,
 }
 
+/// Timewheel implementation for [`IoReactor`](crate::io::IoReactor)
 #[derive(Debug)]
 pub struct TimeWheel<T> {
     hashed: HashMap<u64, Vec<Slot<T>>>,

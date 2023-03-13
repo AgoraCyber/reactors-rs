@@ -119,6 +119,7 @@ impl sys::Socket for Handle {
 
     fn close(&mut self) {
         log::trace!("close fd({})", *self.fd);
+        self.reactor.cancel_all(*self.fd);
 
         unsafe {
             close(*self.fd);
@@ -204,9 +205,7 @@ impl ReactorHandle for Handle {
         {
             Err(_) => Poll::Ready(Ok(())),
             _ => {
-                let fd = self.to_raw_fd();
-                // cancel all pending future.
-                self.reactor.cancel_all(fd);
+                self.clone();
 
                 Poll::Ready(Ok(()))
             }

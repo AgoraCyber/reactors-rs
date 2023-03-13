@@ -19,11 +19,13 @@ use std::{
 
 use crate::{timewheel::TimeWheel, Reactor};
 
+/// Cross-platform raw file description type.
 #[cfg(target_family = "unix")]
 pub type RawFd = std::os::fd::RawFd;
 #[cfg(target_family = "windows")]
 pub type RawFd = winapi::shared::ntdef::HANDLE;
 
+/// IO event name variant.
 #[cfg(target_family = "unix")]
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum EventName {
@@ -31,9 +33,11 @@ pub enum EventName {
     Write,
 }
 
+/// Event message type.
 #[cfg(target_family = "unix")]
 pub type EventMessage = ();
 
+/// Event key is a tuple of type ([`RawFd`],([`EventName`]))
 #[derive(Debug, PartialEq, Hash, Eq, Clone)]
 pub struct Key(RawFd, EventName);
 
@@ -136,6 +140,9 @@ impl Default for IoReactor {
 }
 
 impl IoReactor {
+    /// Create new [`IoReactor`] instance with `tick_duration`.
+    ///
+    /// - `tick_duration` The time precision of [`TimeWheel`] that will be used for the timeout operation.
     pub fn new(tick_duration: Duration) -> Result<Self> {
         let poller = SysPoller::new()?;
 

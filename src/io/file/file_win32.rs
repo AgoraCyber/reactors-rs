@@ -3,7 +3,10 @@ use std::{
     io::{Error, Result, Seek, SeekFrom},
     os::windows::prelude::{FromRawHandle, IntoRawHandle, OpenOptionsExt},
     ptr::null_mut,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{Poll, Waker},
 };
 
@@ -45,6 +48,7 @@ impl Drop for Handle {
 impl Handle {
     fn close(&mut self) {
         unsafe {
+            self.reactor.cancel_all(*self.fd);
             CloseHandle(*self.fd);
         }
     }
@@ -98,8 +102,17 @@ impl ReactorHandle for Handle {
         mut self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<()>> {
-        self.close();
-        Poll::Ready(Ok(()))
+        match self
+            .closed
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        {
+            Err(_) => Poll::Ready(Ok(())),
+            _ => {
+                self.close();
+
+                Poll::Ready(Ok(()))
+            }
+        }
     }
 
     fn poll_read<'cx>(

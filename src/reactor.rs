@@ -60,7 +60,7 @@ pub trait ReactorHandle: Sized {
         timeout: Option<Duration>,
     ) -> Poll<Result<usize>>;
 
-    ///
+    /// Close reactor handle.
     fn poll_close(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,

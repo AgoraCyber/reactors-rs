@@ -245,9 +245,7 @@ impl ReactorHandle for Handle {
         {
             Err(_) => Poll::Ready(Ok(())),
             _ => {
-                let fd = self.to_raw_fd();
-                // cancel all pending future.
-                self.reactor.cancel_all(fd);
+                self.close();
 
                 Poll::Ready(Ok(()))
             }
