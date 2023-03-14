@@ -8,6 +8,11 @@
 * `macos/ios/freebsd` kqueue backend
 * `windows` iocp backend
 
+## bench
+
+<img src="bench.jpg" alt="isolated" style="max-width: 80%"
+/>
+
 ## Thread Model
 
 **reactors** does not limit the thread model it uses. In particular, we can create multiple IoReactor objects to share the IO load

@@ -182,6 +182,9 @@ impl sys::Socket for Handle {
 
         let addr: OsSocketAddr = remote.into();
 
+        self.reactor
+            .once(fd, EventName::Connect, cx.waker().clone(), timeout);
+
         let ret = unsafe {
             ConnectEx(
                 fd as usize,
@@ -198,20 +201,19 @@ impl sys::Socket for Handle {
 
         if ret > 0 {
             // obtain point ownership
-            let overlapped: Box<ReactorOverlapped> = overlapped.into();
+            // let overlapped: Box<ReactorOverlapped> = overlapped.into();
 
-            return Poll::Ready(Ok(()));
+            return Poll::Pending;
         }
 
         // This operation will completing Asynchronously
         if unsafe { GetLastError() } == ERROR_IO_PENDING {
             log::trace!("socket({:?}) connect asynchronously", fd);
 
-            self.reactor
-                .once(fd, EventName::Connect, cx.waker().clone(), timeout);
-
             return Poll::Pending;
         }
+
+        self.reactor.remove_once(fd, EventName::Connect);
 
         return Poll::Ready(Err(Error::last_os_error()));
     }
@@ -309,9 +311,11 @@ impl Handle {
 
         if let Some(event) = self.reactor.poll_io_event(fd, EventName::Accept)? {
             match event.message? {
-                EventMessage::Accept(fd, addr) => {
+                EventMessage::Accept(remote_fd, addr) => {
                     *remote = addr;
-                    *conn_fd = Some(fd);
+                    *conn_fd = Some(remote_fd);
+
+                    log::debug!("acceptor({:?}) accept({:?})", fd, remote_fd);
 
                     return Poll::Ready(Ok(0));
                 }

@@ -186,7 +186,12 @@ impl IoReactor {
         waker: Waker,
         timeout: Option<Duration>,
     ) {
-        log::debug!("fd({:?}) register event({:?})", fd, name);
+        log::debug!(
+            "fd({:?}) register event({:?}) timeout({:?})",
+            fd,
+            name,
+            timeout
+        );
 
         let mut event_loop = self.event_loop.lock().unwrap();
 
