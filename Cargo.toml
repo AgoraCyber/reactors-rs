@@ -1,11 +1,13 @@
 [package]
 name = "reactors"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
-license-file = "LICENSE"
+license = "MIT"
 keywords = ["futures-rs", "reactor", "async", "file", "socket"]
 description = "Performance-focused cross-platform asynchronous IO implementation"
 readme = "README.md"
+repository = "https://github.com/AgoraCyber/reactors-rs"
+documentation = "https://docs.rs/reactors/latest/reactors/"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
