@@ -221,20 +221,22 @@ impl Stream for TcpAcceptor {
         match poll {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(_)) => {
-                let handle =
-                    handle.expect("Underlay accept returns success, but not set tcp handle");
+                if let Some(handle) = handle {
+                    // bind incoming connection to another io reactor instance.
+                    let reactor = if let Some(connection_reactor) = &self.1 {
+                        connection_reactor.clone()
+                    } else {
+                        self.0.reactor.clone()
+                    };
 
-                // bind incoming connection to another io reactor instance.
-                let reactor = if let Some(connection_reactor) = &self.1 {
-                    connection_reactor.clone()
+                    return Poll::Ready(Some(Ok((
+                        TcpStream::from(Handle::new(self.0.ip_v4, handle, reactor)?),
+                        remote
+                            .expect("Underlay accept returns success, but not set remote address"),
+                    ))));
                 } else {
-                    self.0.reactor.clone()
-                };
-
-                return Poll::Ready(Some(Ok((
-                    TcpStream::from(Handle::new(self.0.ip_v4, handle, reactor)?),
-                    remote.expect("Underlay accept returns success, but not set remote address"),
-                ))));
+                    return Poll::Ready(None);
+                }
             }
             Poll::Ready(Err(err)) => {
                 return Poll::Ready(Some(Err(err)));
